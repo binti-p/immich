@@ -30,14 +30,14 @@ jobs:
           context: .
           file: server/Dockerfile
           push: true
-          cache-from: ''
           no-cache: true
           build-args: |
+            DEVICE=cpu
             PUBLIC_IMMICH_SERVER_URL=http://129.114.27.253:32081
           tags: |
             ghcr.io/${{ github.repository_owner }}/immich/immich-server:latest
             ghcr.io/${{ github.repository_owner }}/immich/immich-server:${{ github.sha }}
-
+  
   build-machine-learning:
     runs-on: ubuntu-latest
     permissions:
