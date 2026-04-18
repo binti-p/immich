@@ -32,6 +32,8 @@ WORKDIR /usr/src/app
 COPY ./web ./web/
 COPY ./i18n ./i18n/
 COPY ./open-api ./open-api/
+ARG CACHE_BUST=1
+RUN echo "$CACHE_BUST" && rm -rf web/.svelte-kit
 RUN --mount=type=cache,id=pnpm-web,target=/buildcache/pnpm-store \
   --mount=type=bind,source=package.json,target=package.json \
   --mount=type=bind,source=.pnpmfile.cjs,target=.pnpmfile.cjs \

@@ -124,7 +124,6 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     with:
-      no-cache: true
       image: immich-server
       context: .
       dockerfile: server/Dockerfile
@@ -132,6 +131,7 @@ jobs:
       build-args: |
         DEVICE=cpu
         PUBLIC_IMMICH_SERVER_URL=http://129.114.27.253:32081
+        CACHE_BUST=${{ github.run_id }}
 
   success-check-server:
     name: Docker Build & Push Server Success
