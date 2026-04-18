@@ -30,6 +30,7 @@ jobs:
           context: .
           file: server/Dockerfile
           push: true
+          no-cache: true
           build-args: |
             PUBLIC_IMMICH_SERVER_URL=http://129.114.27.253:32081
           tags: |
