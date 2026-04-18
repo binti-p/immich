@@ -24,7 +24,9 @@ RUN --mount=type=cache,id=pnpm-server,target=/buildcache/pnpm-store \
 FROM builder AS web
 
 ARG BUILD_ID
+ARG PUBLIC_IMMICH_SERVER_URL
 ENV IMMICH_BUILD=${BUILD_ID}
+ENV PUBLIC_IMMICH_SERVER_URL=${PUBLIC_IMMICH_SERVER_URL}
 
 WORKDIR /usr/src/app
 COPY ./web ./web/
