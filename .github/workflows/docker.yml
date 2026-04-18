@@ -95,23 +95,7 @@ jobs:
       matrix:
         include:
           - device: cpu
-          - device: cuda
-            suffixes: '-cuda'
-            platforms: linux/amd64
-          - device: openvino
-            suffixes: '-openvino'
-            platforms: linux/amd64
-          - device: armnn
-            suffixes: '-armnn'
-            platforms: linux/arm64
-          - device: rknn
-            suffixes: '-rknn'
-            platforms: linux/arm64
-          - device: rocm
-            suffixes: '-rocm'
-            platforms: linux/amd64
-            runner-mapping: '{"linux/amd64": "pokedex-large"}'
-    uses: immich-app/devtools/.github/workflows/multi-runner-build.yml@61a0fc2b41524edcc7c9fffb8bb178e6b0ccf21d # multi-runner-build-workflow-v2.3.0
+    uses: immich-app/devtools/.github/workflows/multi-runner-build.yml@61a0fc2b41524edcc7c9fffb8bb178e6b0ccf21d
     permissions:
       contents: read
       actions: read
@@ -123,12 +107,9 @@ jobs:
       image: immich-machine-learning
       context: machine-learning
       dockerfile: machine-learning/Dockerfile
-      platforms: ${{ matrix.platforms }}
-      runner-mapping: ${{ matrix.runner-mapping }}
-      suffixes: ${{ matrix.suffixes }}
-      dockerhub-push: ${{ github.event_name == 'release' }}
+      dockerhub-push: false
       build-args: |
-        DEVICE=${{ matrix.device }}
+        DEVICE=cpu
 
   server:
     name: Build and Push Server
@@ -146,7 +127,7 @@ jobs:
       image: immich-server
       context: .
       dockerfile: server/Dockerfile
-      dockerhub-push: ${{ github.event_name == 'release' }}
+      dockerhub-push: false
       build-args: |
         DEVICE=cpu
 
