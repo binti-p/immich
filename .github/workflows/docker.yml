@@ -130,6 +130,7 @@ jobs:
       dockerhub-push: false
       build-args: |
         DEVICE=cpu
+        PUBLIC_IMMICH_SERVER_URL=http://129.114.27.253:32081
 
   success-check-server:
     name: Docker Build & Push Server Success
