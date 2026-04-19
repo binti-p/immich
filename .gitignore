@@ -36,10 +36,10 @@ vite.config.js.timestamp-*
 data-pipeline-postgres-data/
 postgres-data/
 
+# Triton model venv (generated, not source)
+triton-models/venv/
+
 # Local deployment artifacts
-triton-models/
-triton-server/
 deploy-aesthetic.sh
 DEPLOYMENT_GUIDE.md
 DEPLOYMENT_SUCCESS.md
-.env.aesthetic
