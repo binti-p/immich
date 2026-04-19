@@ -17,6 +17,7 @@ import { InjectKysely } from 'nestjs-kysely';
 import { LockableProperty, Stack } from 'src/database';
 import { Chunked, ChunkedArray, DummyValue, GenerateSql } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
+import { TimelineSortMode } from 'src/dtos/time-bucket.dto';
 import { AssetFileType, AssetOrder, AssetStatus, AssetType, AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
@@ -88,6 +89,7 @@ interface AssetBuilderOptions {
 
 export interface TimeBucketOptions extends AssetBuilderOptions {
   order?: AssetOrder;
+  sortBy?: TimelineSortMode;
 }
 
 export interface TimeBucketItem {
@@ -792,13 +794,20 @@ export class AssetRepository {
           )
           .$if(!!options.isTrashed, (qb) => qb.where('asset.status', '!=', AssetStatus.Deleted))
           .$if(!!options.tagId, (qb) => withTagId(qb, options.tagId!))
-          // Sort by aesthetic score descending (nulls last), then by date as secondary sort
-          .orderBy(
-            sql`CASE WHEN asset."aestheticScore" IS NULL THEN 1 ELSE 0 END`,
-            order === 'desc' ? 'asc' : 'desc',
+          // Aesthetic sort: nulls last, then score DESC, then date as tiebreaker
+          .$if(options.sortBy === TimelineSortMode.Aesthetic, (qb) =>
+            qb
+              .orderBy(
+                sql`CASE WHEN asset."aestheticScore" IS NULL THEN 1 ELSE 0 END`,
+                order === 'desc' ? 'asc' : 'desc',
+              )
+              .orderBy('asset.aestheticScore', 'desc')
+              .orderBy('asset.fileCreatedAt', order),
           )
-          .orderBy('asset.aestheticScore', order)
-          .orderBy('asset.fileCreatedAt', order),
+          // Default chronological sort
+          .$if(options.sortBy !== TimelineSortMode.Aesthetic, (qb) =>
+            qb.orderBy('asset.fileCreatedAt', order),
+          ),
       )
       .with('agg', (qb) =>
         qb

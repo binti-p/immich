@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { TimelineSortMode } from 'src/dtos/time-bucket.dto';
 import { AssetVisibility } from 'src/enum';
 import { TimelineService } from 'src/services/timeline.service';
 import { authStub } from 'test/fixtures/auth.stub';
@@ -243,6 +244,184 @@ describe(TimelineService.name, () => {
           userId: authStub.admin.user.id,
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should forward sortBy=aesthetic to the repository options', async () => {
+      const json = `[{ id: ['asset-id'] }]`;
+      mocks.asset.getTimeBucket.mockResolvedValue({ assets: json });
+
+      await expect(
+        sut.getTimeBucket(authStub.admin, {
+          timeBucket: 'bucket',
+          userId: authStub.admin.user.id,
+          sortBy: TimelineSortMode.Aesthetic,
+        }),
+      ).resolves.toEqual(json);
+
+      expect(mocks.asset.getTimeBucket).toHaveBeenCalledWith(
+        'bucket',
+        expect.objectContaining({
+          timeBucket: 'bucket',
+          userIds: [authStub.admin.user.id],
+          sortBy: TimelineSortMode.Aesthetic,
+        }),
+        authStub.admin,
+      );
+    });
+
+    it('should call the repository with sortBy: undefined when sortBy is absent', async () => {
+      const json = `[{ id: ['asset-id'] }]`;
+      mocks.asset.getTimeBucket.mockResolvedValue({ assets: json });
+
+      await expect(
+        sut.getTimeBucket(authStub.admin, {
+          timeBucket: 'bucket',
+          userId: authStub.admin.user.id,
+        }),
+      ).resolves.toEqual(json);
+
+      const [, options] = mocks.asset.getTimeBucket.mock.calls[0];
+      expect(options.sortBy).toBeUndefined();
+    });
+
+    it('should forward sortBy=date to the repository options', async () => {
+      const json = `[{ id: ['asset-id'] }]`;
+      mocks.asset.getTimeBucket.mockResolvedValue({ assets: json });
+
+      await expect(
+        sut.getTimeBucket(authStub.admin, {
+          timeBucket: 'bucket',
+          userId: authStub.admin.user.id,
+          sortBy: TimelineSortMode.Date,
+        }),
+      ).resolves.toEqual(json);
+
+      expect(mocks.asset.getTimeBucket).toHaveBeenCalledWith(
+        'bucket',
+        expect.objectContaining({
+          timeBucket: 'bucket',
+          userIds: [authStub.admin.user.id],
+          sortBy: TimelineSortMode.Date,
+        }),
+        authStub.admin,
+      );
+    });
+
+    // Integration-style tests (6.1, 6.2): verify response content with concrete example data
+
+    it('6.1 - with sortBy=aesthetic, scored assets appear before unscored assets in the response', async () => {
+      // Simulate a repository response where the DB has already applied aesthetic sort:
+      // asset-scored-high (0.9), asset-scored-low (0.3), asset-unscored (null)
+      const responsePayload = {
+        id: ['asset-scored-high', 'asset-scored-low', 'asset-unscored'],
+        aestheticScore: [0.9, 0.3, null],
+        fileCreatedAt: ['2024-01-01T12:00:00Z', '2024-01-01T11:00:00Z', '2024-01-01T10:00:00Z'],
+        ownerId: ['user-1', 'user-1', 'user-1'],
+        ratio: [1, 1, 1],
+        isFavorite: [false, false, false],
+        visibility: ['TIMELINE', 'TIMELINE', 'TIMELINE'],
+        isTrashed: [false, false, false],
+        isImage: [true, true, true],
+        thumbhash: [null, null, null],
+        localOffsetHours: [0, 0, 0],
+        duration: [null, null, null],
+        projectionType: [null, null, null],
+        livePhotoVideoId: [null, null, null],
+        city: [null, null, null],
+        country: [null, null, null],
+      };
+      const json = JSON.stringify(responsePayload);
+      mocks.asset.getTimeBucket.mockResolvedValue({ assets: json });
+
+      const result = await sut.getTimeBucket(authStub.admin, {
+        timeBucket: '2024-01-01',
+        userId: authStub.admin.user.id,
+        sortBy: TimelineSortMode.Aesthetic,
+      });
+
+      const parsed = JSON.parse(result);
+
+      // Verify the repository was called with sortBy=aesthetic
+      expect(mocks.asset.getTimeBucket).toHaveBeenCalledWith(
+        '2024-01-01',
+        expect.objectContaining({ sortBy: TimelineSortMode.Aesthetic }),
+        authStub.admin,
+      );
+
+      // Verify scored assets appear before unscored assets
+      const scoredIndices = parsed.aestheticScore
+        .map((score: number | null, i: number) => ({ score, i }))
+        .filter(({ score }: { score: number | null }) => score !== null)
+        .map(({ i }: { i: number }) => i);
+      const unscoredIndices = parsed.aestheticScore
+        .map((score: number | null, i: number) => ({ score, i }))
+        .filter(({ score }: { score: number | null }) => score === null)
+        .map(({ i }: { i: number }) => i);
+
+      // Every scored index must be less than every unscored index
+      for (const s of scoredIndices) {
+        for (const u of unscoredIndices) {
+          expect(s).toBeLessThan(u);
+        }
+      }
+
+      // Verify scored assets are in descending order
+      const scoredScores = scoredIndices.map((i: number) => parsed.aestheticScore[i] as number);
+      for (let i = 0; i < scoredScores.length - 1; i++) {
+        expect(scoredScores[i]).toBeGreaterThanOrEqual(scoredScores[i + 1]);
+      }
+
+      // Verify the specific IDs are in the expected order
+      expect(parsed.id[0]).toBe('asset-scored-high');
+      expect(parsed.id[1]).toBe('asset-scored-low');
+      expect(parsed.id[2]).toBe('asset-unscored');
+    });
+
+    it('6.2 - without sortBy, assets are returned in chronological (descending) order', async () => {
+      // Simulate a repository response where the DB has applied default chronological sort (desc)
+      const responsePayload = {
+        id: ['asset-newest', 'asset-middle', 'asset-oldest'],
+        aestheticScore: [null, null, null],
+        fileCreatedAt: ['2024-01-03T12:00:00Z', '2024-01-02T12:00:00Z', '2024-01-01T12:00:00Z'],
+        ownerId: ['user-1', 'user-1', 'user-1'],
+        ratio: [1, 1, 1],
+        isFavorite: [false, false, false],
+        visibility: ['TIMELINE', 'TIMELINE', 'TIMELINE'],
+        isTrashed: [false, false, false],
+        isImage: [true, true, true],
+        thumbhash: [null, null, null],
+        localOffsetHours: [0, 0, 0],
+        duration: [null, null, null],
+        projectionType: [null, null, null],
+        livePhotoVideoId: [null, null, null],
+        city: [null, null, null],
+        country: [null, null, null],
+      };
+      const json = JSON.stringify(responsePayload);
+      mocks.asset.getTimeBucket.mockResolvedValue({ assets: json });
+
+      const result = await sut.getTimeBucket(authStub.admin, {
+        timeBucket: '2024-01-01',
+        userId: authStub.admin.user.id,
+        // no sortBy — should default to chronological
+      });
+
+      const parsed = JSON.parse(result);
+
+      // Verify the repository was called without sortBy (undefined)
+      const [, options] = mocks.asset.getTimeBucket.mock.calls[0];
+      expect(options.sortBy).toBeUndefined();
+
+      // Verify assets are in descending chronological order
+      const dates = parsed.fileCreatedAt.map((d: string) => new Date(d).getTime());
+      for (let i = 0; i < dates.length - 1; i++) {
+        expect(dates[i]).toBeGreaterThanOrEqual(dates[i + 1]);
+      }
+
+      // Verify the specific IDs are in the expected order (newest first)
+      expect(parsed.id[0]).toBe('asset-newest');
+      expect(parsed.id[1]).toBe('asset-middle');
+      expect(parsed.id[2]).toBe('asset-oldest');
     });
   });
 });

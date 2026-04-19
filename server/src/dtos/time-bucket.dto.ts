@@ -4,6 +4,11 @@ import { AssetOrderSchema, AssetVisibilitySchema } from 'src/enum';
 import { stringToBool } from 'src/validation';
 import z from 'zod';
 
+export enum TimelineSortMode {
+  Date = 'date',
+  Aesthetic = 'aesthetic',
+}
+
 const TimeBucketQueryBaseSchema = z
   .object({
     userId: z.uuidv4().optional().describe('Filter assets by specific user ID'),
@@ -64,6 +69,10 @@ const TimeBucketQueryBaseSchema = z
 const TimeBucketSchema = TimeBucketQueryBaseSchema;
 const TimeBucketAssetSchema = TimeBucketQueryBaseSchema.extend({
   timeBucket: z.string().describe('Time bucket identifier in YYYY-MM-DD format').meta({ example: '2024-01-01' }),
+  sortBy: z
+    .enum(TimelineSortMode)
+    .optional()
+    .describe("Sort mode for assets within the time bucket. Allowed values: 'date' (chronological, default) or 'aesthetic' (by aesthetic score descending, nulls last)."),
 }).meta({ id: 'TimeBucketAssetDto' });
 
 const stackTupleSchema = z.array(z.string()).length(2).nullable();

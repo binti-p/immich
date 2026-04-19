@@ -43,4 +43,3 @@ deploy-aesthetic.sh
 DEPLOYMENT_GUIDE.md
 DEPLOYMENT_SUCCESS.md
 .env.aesthetic
-docker-compose.aesthetic.yml
