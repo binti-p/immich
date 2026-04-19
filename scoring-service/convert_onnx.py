@@ -9,12 +9,15 @@ import numpy as np
 
 
 class PersonalizedMLP(nn.Module):
-    def __init__(self, input_dim=832):
+    def __init__(self, input_dim=832, num_users=168, user_emb_dim=64):
         """
-        Takes pre-concatenated (clip_embedding[768] + user_embedding[64]) = 832-dim input.
-        No internal embedding lookup — user embedding is passed in directly.
+        Keeps the embedding table so the checkpoint (which has user_embedding.weight)
+        loads cleanly. At export/inference time the forward() takes a pre-computed
+        user_embedding directly — the lookup table is never called.
         """
         super().__init__()
+        # Required for checkpoint compatibility — weights are loaded but not used at inference
+        self.user_embedding = nn.Embedding(num_users, user_emb_dim)
         self.net = nn.Sequential(
             nn.Linear(input_dim, 512), nn.ReLU(), nn.Dropout(0.2),
             nn.Linear(512, 128),       nn.ReLU(), nn.Dropout(0.1),
@@ -23,6 +26,7 @@ class PersonalizedMLP(nn.Module):
         )
 
     def forward(self, image_embedding, user_embedding):
+        # Always take the pre-computed embedding path (no lookup)
         x = torch.cat([image_embedding, user_embedding], dim=-1)
         return torch.sigmoid(self.net(x))
 
@@ -42,7 +46,7 @@ def convert_ckpt_to_optimized_onnx(ckpt_path, output_dir):
     print(f"[2/4] Inference-only .pth saved")
 
     # --- 3. Export base ONNX ---
-    model = PersonalizedMLP()
+    model = PersonalizedMLP(num_users=168)
     model.load_state_dict(state_dict)
     model.eval()
 
