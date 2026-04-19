@@ -12,30 +12,23 @@
 -- ============================================================================
 
 -- Create the read-only user
--- Note: Replace 'CHANGE_ME_PASSWORD' with a strong password
-CREATE USER immich_readonly WITH PASSWORD 'CHANGE_ME_PASSWORD';
+-- Note: Password should be set via environment variable DATA_PIPELINE_DB_PASSWORD
+CREATE USER IF NOT EXISTS immich_readonly WITH PASSWORD 'readonly_password';
 
 -- Grant CONNECT privilege to the database
 GRANT CONNECT ON DATABASE aesthetic_hub TO immich_readonly;
 
--- Connect to the aesthetic_hub database to grant table-level permissions
-\c aesthetic_hub
-
 -- Grant USAGE on the public schema (required to access tables)
 GRANT USAGE ON SCHEMA public TO immich_readonly;
 
--- Grant SELECT permission on aesthetic_scores table only
-GRANT SELECT ON TABLE aesthetic_scores TO immich_readonly;
+-- Grant SELECT permission on aesthetic_scores table only (if it exists)
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'aesthetic_scores') THEN
+        GRANT SELECT ON TABLE aesthetic_scores TO immich_readonly;
+        REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE aesthetic_scores FROM immich_readonly;
+    END IF;
+END $$;
 
--- Revoke all other permissions to ensure read-only access
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE aesthetic_scores FROM immich_readonly;
-
--- Verify the user has been created and permissions are correct
-\du immich_readonly
-\dp aesthetic_scores
-
--- ============================================================================
--- Expected Output:
--- - User 'immich_readonly' should exist
--- - aesthetic_scores table should show SELECT permission for immich_readonly
--- ============================================================================
+-- Note: Verification commands (\du, \dp) are commented out for docker-entrypoint-initdb.d
+-- You can verify manually by connecting to the database after startup

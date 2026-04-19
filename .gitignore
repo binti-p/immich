@@ -31,3 +31,16 @@ vite.config.js.timestamp-*
 *.tsbuildinfo
 *.tsbuildInfo
 .kiro/*
+
+# Local postgres data directories (should never be committed)
+data-pipeline-postgres-data/
+postgres-data/
+
+# Local deployment artifacts
+triton-models/
+triton-server/
+deploy-aesthetic.sh
+DEPLOYMENT_GUIDE.md
+DEPLOYMENT_SUCCESS.md
+.env.aesthetic
+docker-compose.aesthetic.yml
