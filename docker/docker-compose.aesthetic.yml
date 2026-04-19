@@ -9,7 +9,7 @@ services:
     container_name: immich_server
     image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-release}
     volumes:
-      - ${UPLOAD_LOCATION:-./uploads}:/data
+      - ${UPLOAD_LOCATION:-../uploads}:/data
       - /etc/localtime:/etc/localtime:ro
     environment:
       # Immich Database
@@ -98,7 +98,7 @@ services:
       POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
       POSTGRES_INITDB_ARGS: '--data-checksums'
     volumes:
-      - ${DB_DATA_LOCATION:-./postgres-data}:/var/lib/postgresql/data
+      - ${DB_DATA_LOCATION:-../postgres-data}:/var/lib/postgresql/data
     shm_size: 128mb
     restart: unless-stopped
     healthcheck:
@@ -114,7 +114,7 @@ services:
   scoring-service:
     container_name: scoring_service
     build:
-      context: ./scoring-service
+      context: ../scoring-service
       dockerfile: Dockerfile
     environment:
       POSTGRES_HOST: data_pipeline_postgres
@@ -130,7 +130,7 @@ services:
     ports:
       - '8001:8000'
     volumes:
-      - ${UPLOAD_LOCATION:-./uploads}:/data:ro
+      - ${UPLOAD_LOCATION:-../uploads}:/data:ro
     depends_on:
       data_pipeline_postgres:
         condition: service_healthy
@@ -146,10 +146,10 @@ services:
   triton:
     container_name: triton
     build:
-      context: ./triton-server
+      context: ../triton-server
       dockerfile: Dockerfile
     volumes:
-      - ./triton-models:/models
+      - ../triton-models:/models
     environment:
       MODEL_REPOSITORY: /models
     ports:
@@ -170,8 +170,8 @@ services:
       POSTGRES_USER: ${DATA_PIPELINE_POSTGRES_USER:-aesthetic}
       POSTGRES_DB: ${DATA_PIPELINE_DB_NAME:-aesthetic_hub}
     volumes:
-      - ${DATA_PIPELINE_DB_DATA_LOCATION:-./data-pipeline-postgres-data}:/var/lib/postgresql/data
-      - ./deploy/scripts/init-aesthetic-scores-table.sql:/docker-entrypoint-initdb.d/01-init-tables.sql
+      - ${DATA_PIPELINE_DB_DATA_LOCATION:-../data-pipeline-postgres-data}:/var/lib/postgresql/data
+      - ../deploy/scripts/init-aesthetic-scores-table.sql:/docker-entrypoint-initdb.d/01-init-tables.sql
     ports:
       - '5433:5432'
     restart: unless-stopped
@@ -189,7 +189,7 @@ services:
     container_name: prometheus
     image: prom/prometheus:latest
     volumes:
-      - ./deploy/k8s/monitoring/prometheus-configmap.yaml:/etc/prometheus/prometheus.yml:ro
+      - ../deploy/k8s/monitoring/prometheus-configmap.yaml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -208,7 +208,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: false
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./deploy/k8s/monitoring/immich-grafana-dashboard.json:/etc/grafana/provisioning/dashboards/immich.json:ro
+      - ../deploy/k8s/monitoring/immich-grafana-dashboard.json:/etc/grafana/provisioning/dashboards/immich.json:ro
     ports:
       - '3001:3000'
     depends_on:
