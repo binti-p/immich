@@ -23,13 +23,6 @@ services:
       REDIS_HOSTNAME: immich_redis
       REDIS_PORT: 6379
       
-      # Data Pipeline Database (read-only)
-      DATA_PIPELINE_DB_HOST: data_pipeline_postgres
-      DATA_PIPELINE_DB_PORT: 5432
-      DATA_PIPELINE_DB_NAME: ${DATA_PIPELINE_DB_NAME:-aesthetic_hub}
-      DATA_PIPELINE_DB_USER: ${DATA_PIPELINE_DB_USER:-immich_readonly}
-      DATA_PIPELINE_DB_PASSWORD: ${DATA_PIPELINE_DB_PASSWORD:-readonly_password}
-      
       # Feature Service (Scoring Service)
       FEATURE_SERVICE_URL: http://scoring-service:8000
       ENABLE_AESTHETIC_SCORING: ${ENABLE_AESTHETIC_SCORING:-true}
@@ -47,8 +40,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      data_pipeline_postgres:
-        condition: service_healthy
       scoring-service:
         condition: service_started
     restart: unless-stopped
@@ -63,10 +54,8 @@ services:
     container_name: immich_web
     image: ghcr.io/immich-app/immich-web:${IMMICH_VERSION:-release}
     environment:
-      # Must be the URL the browser can reach (localhost = host machine)
       IMMICH_SERVER_URL: http://localhost:2283
     extra_hosts:
-      # Allow the container's SSR to also reach the server via localhost
       - "host.docker.internal:host-gateway"
     ports:
       - '3000:3000'
@@ -117,11 +106,12 @@ services:
       context: ../scoring-service
       dockerfile: Dockerfile
     environment:
-      POSTGRES_HOST: data_pipeline_postgres
+      # Point scoring service at the Immich postgres DB
+      POSTGRES_HOST: immich_postgres
       POSTGRES_PORT: 5432
-      POSTGRES_DB: ${DATA_PIPELINE_DB_NAME:-aesthetic_hub}
-      POSTGRES_USER: ${DATA_PIPELINE_POSTGRES_USER:-aesthetic}
-      POSTGRES_PASSWORD: ${DATA_PIPELINE_POSTGRES_PASSWORD:-aesthetic_password}
+      POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       TRITON_HOST: triton
       TRITON_PORT: 8000
       LOG_LEVEL: ${SCORING_LOG_LEVEL:-INFO}
@@ -133,7 +123,7 @@ services:
     volumes:
       - ${UPLOAD_LOCATION:-../uploads}:/data:ro
     depends_on:
-      data_pipeline_postgres:
+      immich_postgres:
         condition: service_healthy
       triton:
         condition: service_started
@@ -154,7 +144,7 @@ services:
     environment:
       MODEL_REPOSITORY: /models
     ports:
-      - '8010:8000'   # HTTP inference (KServe v2 protocol)
+      - '8010:8000'
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/v2/health/ready || exit 1"]
@@ -162,25 +152,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 15s
-
-  data_pipeline_postgres:
-    container_name: data_pipeline_postgres
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_PASSWORD: ${DATA_PIPELINE_POSTGRES_PASSWORD:-aesthetic_password}
-      POSTGRES_USER: ${DATA_PIPELINE_POSTGRES_USER:-aesthetic}
-      POSTGRES_DB: ${DATA_PIPELINE_DB_NAME:-aesthetic_hub}
-    volumes:
-      - ${DATA_PIPELINE_DB_DATA_LOCATION:-../data-pipeline-postgres-data}:/var/lib/postgresql/data
-      - ../deploy/scripts/init-aesthetic-scores-table.sql:/docker-entrypoint-initdb.d/01-init-tables.sql
-    ports:
-      - '5433:5432'
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DATA_PIPELINE_POSTGRES_USER:-aesthetic} -d ${DATA_PIPELINE_DB_NAME:-aesthetic_hub}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # ============================================================================
   # Monitoring (Optional)

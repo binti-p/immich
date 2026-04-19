@@ -32,9 +32,9 @@ vite.config.js.timestamp-*
 *.tsbuildInfo
 .kiro/*
 
-# Local postgres data directories (should never be committed)
-data-pipeline-postgres-data/
+# Local postgres data directory (should never be committed)
 postgres-data/
+docker/data-pipeline-postgres-data/
 
 # Triton model venv (generated, not source)
 triton-models/venv/
