@@ -850,6 +850,8 @@ export type TagResponseDto = {
     value: string;
 };
 export type AssetResponseDto = {
+    /** Aesthetic score from ML model (0.0 to 1.0), null if not yet scored */
+    aestheticScore?: number | null;
     /** Base64 encoded SHA1 hash */
     checksum: string;
     /** The UTC timestamp when the asset was originally uploaded to Immich. */
@@ -2669,6 +2671,8 @@ export type TagUpdateDto = {
     color?: string | null;
 };
 export type TimeBucketAssetResponseDto = {
+    /** Array of aesthetic scores from ML model (0.0 to 1.0), null if not yet scored */
+    aestheticScore?: (number | null)[];
     /** Array of city names extracted from EXIF GPS data */
     city: (string | null)[];
     /** Array of country names extracted from EXIF GPS data */
@@ -2711,6 +2715,12 @@ export type TimeBucketsResponseDto = {
     count: number;
     /** Time bucket identifier in YYYY-MM-DD format representing the start of the time period */
     timeBucket: string;
+};
+export type TimeBucketsWithTotalResponseDto = {
+    /** Array of time buckets with asset counts */
+    buckets: TimeBucketsResponseDto[];
+    /** Total number of assets across all time buckets */
+    totalCount: number;
 };
 export type TrashResponseDto = {
     /** Number of items in trash */
@@ -5589,12 +5599,7 @@ export function deleteServerLicense(opts?: Oazapfts.RequestOpts) {
  * Get product key
  */
 export function getServerLicense(opts?: Oazapfts.RequestOpts) {
-    return oazapfts.ok(oazapfts.fetchJson<{
-        status: 200;
-        data: UserLicense;
-    } | {
-        status: 404;
-    }>("/server/license", {
+    return oazapfts.ok(oazapfts.fetchText("/server/license", {
         ...opts
     }));
 }
@@ -6332,6 +6337,47 @@ export function getTimeBuckets({ albumId, bbox, isFavorite, isTrashed, key, orde
         status: 200;
         data: TimeBucketsResponseDto[];
     }>(`/timeline/buckets${QS.query(QS.explode({
+        albumId,
+        bbox,
+        isFavorite,
+        isTrashed,
+        key,
+        order,
+        personId,
+        slug,
+        tagId,
+        userId,
+        visibility,
+        withCoordinates,
+        withPartners,
+        withStacked
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Get time buckets with total count
+ */
+export function getTimeBucketsWithTotal({ albumId, bbox, isFavorite, isTrashed, key, order, personId, slug, tagId, userId, visibility, withCoordinates, withPartners, withStacked }: {
+    albumId?: string;
+    bbox?: string;
+    isFavorite?: boolean;
+    isTrashed?: boolean;
+    key?: string;
+    order?: AssetOrder;
+    personId?: string;
+    slug?: string;
+    tagId?: string;
+    userId?: string;
+    visibility?: AssetVisibility;
+    withCoordinates?: boolean;
+    withPartners?: boolean;
+    withStacked?: boolean;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TimeBucketsWithTotalResponseDto;
+    }>(`/timeline/buckets/with-total${QS.query(QS.explode({
         albumId,
         bbox,
         isFavorite,

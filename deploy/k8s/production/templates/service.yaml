@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aesthetic-scoring
+  namespace: aesthetic-hub
+  labels:
+    app: aesthetic-scoring
+    track: production
+spec:
+  type: ClusterIP
+  selector:
+    app: aesthetic-scoring
+    track: production
+  ports:
+    - name: http
+      port: {{ .Values.scoringService.port }}
+      targetPort: {{ .Values.scoringService.port }}
+{{- if .Values.triton.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-production
+  namespace: aesthetic-hub
+  labels:
+    app: triton
+    track: production
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.triton.metricsPort }}"
+spec:
+  type: ClusterIP
+  selector:
+    app: triton
+    track: production
+  ports:
+    - name: http
+      port: {{ .Values.triton.port }}
+      targetPort: {{ .Values.triton.port }}
+    - name: grpc
+      port: 8001
+      targetPort: 8001
+    - name: metrics
+      port: {{ .Values.triton.metricsPort }}
+      targetPort: {{ .Values.triton.metricsPort }}
+{{- end }}

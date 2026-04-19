@@ -1,0 +1,180 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus:9090
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: 30s
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+  namespace: monitoring
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: Aesthetic Hub
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-cluster
+  namespace: monitoring
+data:
+  cluster-overview.json: |
+    {
+      "title": "Aesthetic Hub - Cluster Overview",
+      "uid": "aes-cluster",
+      "tags": ["kubernetes", "aesthetic-hub"],
+      "timezone": "browser",
+      "schemaVersion": 38,
+      "refresh": "30s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Node CPU Usage (%)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 70},
+                  {"color": "red", "value": 85}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 2,
+          "title": "Node Memory Usage (%)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 70},
+                  {"color": "red", "value": 85}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "title": "Pod Count by Namespace",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 8, "x": 0, "y": 8},
+          "targets": [
+            {
+              "expr": "count by(namespace) (kube_pod_status_ready{condition=\"true\"})",
+              "legendFormat": "{{namespace}}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Node Disk Usage (%)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "targets": [
+            {
+              "expr": "(1 - (node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})) * 100",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 70},
+                  {"color": "red", "value": 80}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "title": "Pod Restart Rate",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "targets": [
+            {
+              "expr": "sum by(pod, namespace) (increase(kube_pod_container_status_restarts_total[10m]))",
+              "legendFormat": "{{namespace}}/{{pod}}"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "HPA Replica Count",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+          "targets": [
+            {
+              "expr": "kube_horizontalpodautoscaler_status_current_replicas",
+              "legendFormat": "{{horizontalpodautoscaler}} (current)"
+            },
+            {
+              "expr": "kube_horizontalpodautoscaler_spec_max_replicas",
+              "legendFormat": "{{horizontalpodautoscaler}} (max)"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "Active Alerts",
+          "type": "alertlist",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+          "options": {
+            "alertName": "",
+            "dashboardAlerts": false,
+            "maxItems": 20,
+            "sortOrder": 1,
+            "stateFilter": {"firing": true, "pending": true}
+          }
+        }
+      ]
+    }

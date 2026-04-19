@@ -20,6 +20,7 @@ import { ErrorInterceptor } from 'src/middleware/error.interceptor';
 import { FileUploadInterceptor } from 'src/middleware/file-upload.interceptor';
 import { GlobalExceptionFilter } from 'src/middleware/global-exception.filter';
 import { LoggingInterceptor } from 'src/middleware/logging.interceptor';
+import { AestheticIntegrationModule } from 'src/modules/aesthetic-integration/aesthetic-integration.module';
 import { repositories } from 'src/repositories';
 import { AppRepository } from 'src/repositories/app.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
@@ -102,7 +103,7 @@ export class BaseModule implements OnModuleInit, OnModuleDestroy {
 }
 
 @Module({
-  imports: [...bullImports, ...commonImports, ScheduleModule.forRoot()],
+  imports: [...bullImports, ...commonImports, ScheduleModule.forRoot(), AestheticIntegrationModule],
   controllers: [...controllers],
   providers: [...common, ...apiMiddleware, { provide: IWorker, useValue: ImmichWorker.Api }],
 })

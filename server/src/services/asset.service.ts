@@ -33,6 +33,58 @@ import {
   Permission,
   QueueName,
 } from 'src/enum';
+import { AestheticIntegrationService } from 'src/modules/aesthetic-integration/aesthetic-integration.service';
+import { AccessRepository } from 'src/repositories/access.repository';
+import { ActivityRepository } from 'src/repositories/activity.repository';
+import { AlbumUserRepository } from 'src/repositories/album-user.repository';
+import { AlbumRepository } from 'src/repositories/album.repository';
+import { ApiKeyRepository } from 'src/repositories/api-key.repository';
+import { AppRepository } from 'src/repositories/app.repository';
+import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
+import { AssetJobRepository } from 'src/repositories/asset-job.repository';
+import { AssetRepository } from 'src/repositories/asset.repository';
+import { ConfigRepository } from 'src/repositories/config.repository';
+import { CronRepository } from 'src/repositories/cron.repository';
+import { CryptoRepository } from 'src/repositories/crypto.repository';
+import { DatabaseRepository } from 'src/repositories/database.repository';
+import { DownloadRepository } from 'src/repositories/download.repository';
+import { DuplicateRepository } from 'src/repositories/duplicate.repository';
+import { EmailRepository } from 'src/repositories/email.repository';
+import { EventRepository } from 'src/repositories/event.repository';
+import { JobRepository } from 'src/repositories/job.repository';
+import { LibraryRepository } from 'src/repositories/library.repository';
+import { LoggingRepository } from 'src/repositories/logging.repository';
+import { MachineLearningRepository } from 'src/repositories/machine-learning.repository';
+import { MapRepository } from 'src/repositories/map.repository';
+import { MediaRepository } from 'src/repositories/media.repository';
+import { MemoryRepository } from 'src/repositories/memory.repository';
+import { MetadataRepository } from 'src/repositories/metadata.repository';
+import { MoveRepository } from 'src/repositories/move.repository';
+import { NotificationRepository } from 'src/repositories/notification.repository';
+import { OAuthRepository } from 'src/repositories/oauth.repository';
+import { OcrRepository } from 'src/repositories/ocr.repository';
+import { PartnerRepository } from 'src/repositories/partner.repository';
+import { PersonRepository } from 'src/repositories/person.repository';
+import { PluginRepository } from 'src/repositories/plugin.repository';
+import { ProcessRepository } from 'src/repositories/process.repository';
+import { SearchRepository } from 'src/repositories/search.repository';
+import { ServerInfoRepository } from 'src/repositories/server-info.repository';
+import { SessionRepository } from 'src/repositories/session.repository';
+import { SharedLinkAssetRepository } from 'src/repositories/shared-link-asset.repository';
+import { SharedLinkRepository } from 'src/repositories/shared-link.repository';
+import { StackRepository } from 'src/repositories/stack.repository';
+import { StorageRepository } from 'src/repositories/storage.repository';
+import { SyncCheckpointRepository } from 'src/repositories/sync-checkpoint.repository';
+import { SyncRepository } from 'src/repositories/sync.repository';
+import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
+import { TagRepository } from 'src/repositories/tag.repository';
+import { TelemetryRepository } from 'src/repositories/telemetry.repository';
+import { TrashRepository } from 'src/repositories/trash.repository';
+import { UserRepository } from 'src/repositories/user.repository';
+import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
+import { ViewRepository } from 'src/repositories/view-repository';
+import { WebsocketRepository } from 'src/repositories/websocket.repository';
+import { WorkflowRepository } from 'src/repositories/workflow.repository';
 import { BaseService } from 'src/services/base.service';
 import { JobItem, JobOf } from 'src/types';
 import { requireElevatedPermission } from 'src/utils/access';
@@ -43,6 +95,7 @@ import {
   onAfterUnlink,
   onBeforeLink,
   onBeforeUnlink,
+  sortByAestheticScore,
 } from 'src/utils/asset.util';
 import { updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone } from 'src/utils/date';
@@ -50,6 +103,114 @@ import { transformOcrBoundingBox } from 'src/utils/transform';
 
 @Injectable()
 export class AssetService extends BaseService {
+  constructor(
+    logger: LoggingRepository,
+    accessRepository: AccessRepository,
+    activityRepository: ActivityRepository,
+    albumRepository: AlbumRepository,
+    albumUserRepository: AlbumUserRepository,
+    apiKeyRepository: ApiKeyRepository,
+    appRepository: AppRepository,
+    assetRepository: AssetRepository,
+    assetEditRepository: AssetEditRepository,
+    assetJobRepository: AssetJobRepository,
+    configRepository: ConfigRepository,
+    cronRepository: CronRepository,
+    cryptoRepository: CryptoRepository,
+    databaseRepository: DatabaseRepository,
+    downloadRepository: DownloadRepository,
+    duplicateRepository: DuplicateRepository,
+    emailRepository: EmailRepository,
+    eventRepository: EventRepository,
+    jobRepository: JobRepository,
+    libraryRepository: LibraryRepository,
+    machineLearningRepository: MachineLearningRepository,
+    mapRepository: MapRepository,
+    mediaRepository: MediaRepository,
+    memoryRepository: MemoryRepository,
+    metadataRepository: MetadataRepository,
+    moveRepository: MoveRepository,
+    notificationRepository: NotificationRepository,
+    oauthRepository: OAuthRepository,
+    ocrRepository: OcrRepository,
+    partnerRepository: PartnerRepository,
+    personRepository: PersonRepository,
+    pluginRepository: PluginRepository,
+    processRepository: ProcessRepository,
+    searchRepository: SearchRepository,
+    serverInfoRepository: ServerInfoRepository,
+    sessionRepository: SessionRepository,
+    sharedLinkRepository: SharedLinkRepository,
+    sharedLinkAssetRepository: SharedLinkAssetRepository,
+    stackRepository: StackRepository,
+    storageRepository: StorageRepository,
+    syncRepository: SyncRepository,
+    syncCheckpointRepository: SyncCheckpointRepository,
+    systemMetadataRepository: SystemMetadataRepository,
+    tagRepository: TagRepository,
+    telemetryRepository: TelemetryRepository,
+    trashRepository: TrashRepository,
+    userRepository: UserRepository,
+    versionRepository: VersionHistoryRepository,
+    viewRepository: ViewRepository,
+    websocketRepository: WebsocketRepository,
+    workflowRepository: WorkflowRepository,
+    private readonly aestheticIntegrationService: AestheticIntegrationService,
+  ) {
+    super(
+      logger,
+      accessRepository,
+      activityRepository,
+      albumRepository,
+      albumUserRepository,
+      apiKeyRepository,
+      appRepository,
+      assetRepository,
+      assetEditRepository,
+      assetJobRepository,
+      configRepository,
+      cronRepository,
+      cryptoRepository,
+      databaseRepository,
+      downloadRepository,
+      duplicateRepository,
+      emailRepository,
+      eventRepository,
+      jobRepository,
+      libraryRepository,
+      machineLearningRepository,
+      mapRepository,
+      mediaRepository,
+      memoryRepository,
+      metadataRepository,
+      moveRepository,
+      notificationRepository,
+      oauthRepository,
+      ocrRepository,
+      partnerRepository,
+      personRepository,
+      pluginRepository,
+      processRepository,
+      searchRepository,
+      serverInfoRepository,
+      sessionRepository,
+      sharedLinkRepository,
+      sharedLinkAssetRepository,
+      stackRepository,
+      storageRepository,
+      syncRepository,
+      syncCheckpointRepository,
+      systemMetadataRepository,
+      tagRepository,
+      telemetryRepository,
+      trashRepository,
+      userRepository,
+      versionRepository,
+      viewRepository,
+      websocketRepository,
+      workflowRepository,
+    );
+  }
   async getStatistics(auth: AuthDto, dto: AssetStatsDto) {
     if (dto.visibility === AssetVisibility.Locked) {
       requireElevatedPermission(auth);
@@ -88,6 +249,10 @@ export class AssetService extends BaseService {
     if (data.ownerId !== auth.user.id || auth.sharedLink) {
       data.people = [];
     }
+
+    // Query aesthetic score for this asset
+    const scoresMap = await this.getAestheticScoresForAssets([id]);
+    data.aestheticScore = scoresMap.get(id) ?? null;
 
     return data;
   }
@@ -613,5 +778,77 @@ export class AssetService extends BaseService {
 
     await this.assetEditRepository.replaceAll(id, []);
     await this.jobRepository.queue({ name: JobName.AssetEditThumbnailGeneration, data: { id } });
+  }
+
+  /**
+   * Query aesthetic scores for a list of assets and return a map of asset ID to score.
+   * This method is used to enrich asset responses with aesthetic scores from the Data Pipeline DB.
+   * 
+   * @param assetIds - Array of asset IDs to query scores for
+   * @returns Map of asset ID to aesthetic score (0.0 to 1.0), or empty map if feature is disabled or query fails
+   */
+  async getAestheticScoresForAssets(assetIds: string[]): Promise<Map<string, number>> {
+    if (assetIds.length === 0) {
+      return new Map();
+    }
+
+    try {
+      const scoresMap = await this.aestheticIntegrationService.getScoresForAssets(assetIds);
+      // Convert AestheticScoreDto map to simple score map
+      const scoreValues = new Map<string, number>();
+      for (const [assetId, scoreDto] of scoresMap.entries()) {
+        scoreValues.set(assetId, scoreDto.score);
+      }
+      return scoreValues;
+    } catch (error) {
+      // Log error but don't fail the request - graceful degradation
+      this.logger.error(`Failed to query aesthetic scores: ${error}`, {
+        assetIds: assetIds.slice(0, 10), // Log first 10 IDs to avoid huge logs
+        error,
+      });
+      return new Map();
+    }
+  }
+
+  /**
+   * Enrich asset responses with aesthetic scores and sort by score descending.
+   * Assets without scores are placed at the end (NULLS LAST behavior).
+   * 
+   * This is a helper method that can be used by any service that needs to return
+   * score-sorted assets. It handles score retrieval, merging, and sorting in one call.
+   * 
+   * @param assets - Array of asset response DTOs to enrich and sort
+   * @returns The same array with aestheticScore field added and sorted by score descending
+   * 
+   * @example
+   * const assets = await assetRepository.getAll(userId);
+   * const mappedAssets = assets.map(asset => mapAsset(asset, { auth }));
+   * const sortedAssets = await assetService.enrichAndSortByAestheticScore(mappedAssets);
+   */
+  async enrichAndSortByAestheticScore<T extends AssetResponseDto>(assets: T[]): Promise<Array<T & { aestheticScore: number | null }>> {
+    if (assets.length === 0) {
+      return assets as Array<T & { aestheticScore: number | null }>;
+    }
+
+    // Extract asset IDs
+    const assetIds = assets.map(asset => asset.id);
+
+    // Query aesthetic scores
+    const scoresMap = await this.getAestheticScoresForAssets(assetIds);
+
+    // Track gallery query metric
+    // Requirement: 14.4
+    const hasScores = scoresMap.size > 0;
+    const hasScoresLabel = hasScores ? 'true' : 'false';
+    this.telemetryRepository.api.addToCounter(`immich_gallery_queries_total.has_scores_${hasScoresLabel}`, 1);
+
+    // Merge scores into asset responses
+    const assetsWithScores = assets.map(asset => ({
+      ...asset,
+      aestheticScore: scoresMap.get(asset.id) ?? null,
+    }));
+
+    // Sort by aesthetic score using utility function
+    return sortByAestheticScore(assetsWithScores);
   }
 }

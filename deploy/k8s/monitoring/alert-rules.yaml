@@ -1,0 +1,256 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+  namespace: monitoring
+data:
+  alert-rules.yaml: |
+    groups:
+      - name: infrastructure
+        interval: 30s
+        rules:
+          - alert: HighCPUUsage
+            expr: (sum(rate(container_cpu_usage_seconds_total[5m])) / sum(machine_cpu_cores)) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+              category: infrastructure
+            annotations:
+              summary: "High CPU usage detected"
+              description: "Cluster CPU usage is {{ printf \"%.1f\" $value }}% (threshold: 80%)"
+
+          - alert: HighMemoryUsage
+            expr: (1 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))) * 100 > 85
+            for: 5m
+            labels:
+              severity: warning
+              category: infrastructure
+            annotations:
+              summary: "High memory usage detected"
+              description: "Cluster memory usage is {{ printf \"%.1f\" $value }}% (threshold: 85%)"
+
+          - alert: DiskSpaceLow
+            expr: (node_filesystem_size_bytes{fstype="ext4"} - node_filesystem_avail_bytes{fstype="ext4"}) / node_filesystem_size_bytes{fstype="ext4"} * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+              category: infrastructure
+            annotations:
+              summary: "Low disk space on {{ $labels.instance }}"
+              description: "Disk usage is {{ printf \"%.1f\" $value }}% on {{ $labels.device }} (threshold: 80%)"
+
+          - alert: PersistentVolumeCapacityHigh
+            expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+              category: infrastructure
+            annotations:
+              summary: "PVC {{ $labels.persistentvolumeclaim }} capacity is high"
+              description: "PVC usage in {{ $labels.namespace }} is {{ printf \"%.1f\" $value }}% (threshold: 80%)"
+
+          - alert: NodeNotReady
+            expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              category: infrastructure
+            annotations:
+              summary: "Node {{ $labels.node }} is not ready"
+              description: "Kubernetes node {{ $labels.node }} has been not ready for more than 1 minute"
+
+          - alert: PodCrashLooping
+            expr: increase(kube_pod_container_status_restarts_total[10m]) > 3
+            for: 5m
+            labels:
+              severity: critical
+              category: infrastructure
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+              description: "Container {{ $labels.container }} restarted {{ $value }} times in the last 10 minutes"
+
+          - alert: PodNotReady
+            expr: kube_pod_status_ready{condition="false"} == 1
+            for: 10m
+            labels:
+              severity: warning
+              category: infrastructure
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is not ready"
+              description: "Pod has not been ready for 10 minutes"
+
+          - alert: DeploymentReplicasMismatch
+            expr: kube_deployment_spec_replicas != kube_deployment_status_available_replicas
+            for: 10m
+            labels:
+              severity: warning
+              category: infrastructure
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replicas mismatch"
+              description: "Deployment has {{ $value }} available replicas but desired a different count"
+
+          - alert: ContainerOOMKill
+            expr: increase(kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}[1h]) > 0
+            for: 1m
+            labels:
+              severity: critical
+              category: infrastructure
+            annotations:
+              summary: "Container OOMKilled in {{ $labels.namespace }}/{{ $labels.pod }}"
+              description: "Container {{ $labels.container }} was killed due to out-of-memory"
+
+      - name: ml-pipeline
+        interval: 30s
+        rules:
+          - alert: MLflowServiceDown
+            expr: up{job="mlflow"} == 0
+            for: 2m
+            labels:
+              severity: critical
+              category: ml-pipeline
+            annotations:
+              summary: "MLflow tracking server is down"
+              description: "MLflow is unreachable. Training runs cannot be logged. Check the mlflow pod in the platform namespace"
+
+          - alert: TritonServiceDown
+            expr: up{job="triton"} == 0
+            for: 2m
+            labels:
+              severity: critical
+              category: ml-pipeline
+            annotations:
+              summary: "Triton inference server is down"
+              description: "Triton is not responding. Aesthetic scoring inference is unavailable"
+
+          - alert: HighInferenceLatency
+            expr: histogram_quantile(0.99, rate(triton_inference_request_duration_us[5m])) > 1000000
+            for: 5m
+            labels:
+              severity: warning
+              category: ml-pipeline
+            annotations:
+              summary: "High inference latency detected"
+              description: "P99 inference latency is {{ printf \"%.0f\" $value }}us (threshold: 1000ms)"
+
+          - alert: InferenceErrorRateHigh
+            expr: (sum(rate(triton_inference_request_total{success="false"}[5m])) / sum(rate(triton_inference_request_total[5m]))) * 100 > 5
+            for: 5m
+            labels:
+              severity: warning
+              category: ml-pipeline
+            annotations:
+              summary: "High inference error rate"
+              description: "Error rate is {{ printf \"%.1f\" $value }}% (threshold: 5%)"
+
+          - alert: InferenceSuccessRateLow
+            expr: (sum(rate(triton_inference_request_total{success="true"}[5m])) / sum(rate(triton_inference_request_total[5m]))) * 100 < 95
+            for: 5m
+            labels:
+              severity: critical
+              category: ml-pipeline
+            annotations:
+              summary: "Inference success rate is critically low"
+              description: "Success rate is {{ printf \"%.1f\" $value }}% (threshold: 95%)"
+
+          - alert: ModelLoadFailure
+            expr: increase(triton_model_load_failures_total[1h]) > 0
+            for: 1m
+            labels:
+              severity: critical
+              category: ml-pipeline
+            annotations:
+              summary: "Model failed to load on Triton"
+              description: "{{ $value }} model load failures in the last hour"
+
+          - alert: TritonMemoryUsageHigh
+            expr: triton_server_memory_usage_bytes / 1024 / 1024 / 1024 > 3
+            for: 5m
+            labels:
+              severity: warning
+              category: ml-pipeline
+            annotations:
+              summary: "Triton memory usage is high"
+              description: "Triton is using {{ printf \"%.2f\" $value }}GB (threshold: 3GB)"
+
+          - alert: InferenceQueueDepthHigh
+            expr: triton_inference_queue_depth > 100
+            for: 5m
+            labels:
+              severity: warning
+              category: ml-pipeline
+            annotations:
+              summary: "Inference queue depth is high"
+              description: "Queue depth is {{ printf \"%.0f\" $value }} (threshold: 100)"
+
+          - alert: InferenceThroughputLow
+            expr: rate(triton_inference_request_total[5m]) < 1
+            for: 10m
+            labels:
+              severity: warning
+              category: ml-pipeline
+            annotations:
+              summary: "Inference throughput is low"
+              description: "Inference rate is {{ printf \"%.2f\" $value }} req/s (threshold: 1 req/s)"
+
+          - alert: DataPipelineProcessingDelayed
+            expr: increase(data_pipeline_processed_records[1h]) < 100
+            for: 15m
+            labels:
+              severity: warning
+              category: ml-pipeline
+            annotations:
+              summary: "Data pipeline processing is slow"
+              description: "Only {{ printf \"%.0f\" $value }} records processed in last hour (threshold: 100)"
+
+          - alert: FeatureStoreLagHigh
+            expr: histogram_quantile(0.95, rate(feature_store_request_duration_seconds_bucket[5m])) > 2
+            for: 5m
+            labels:
+              severity: warning
+              category: ml-pipeline
+            annotations:
+              summary: "Feature store latency is high"
+              description: "P95 latency is {{ printf \"%.2f\" $value }}s (threshold: 2s)"
+
+      - name: monitoring-stack
+        interval: 30s
+        rules:
+          - alert: PrometheusDown
+            expr: up{job="prometheus"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              category: monitoring
+            annotations:
+              summary: "Prometheus is down"
+              description: "Prometheus monitoring server is unreachable"
+
+          - alert: GrafanaDown
+            expr: up{job="grafana"} == 0
+            for: 2m
+            labels:
+              severity: warning
+              category: monitoring
+            annotations:
+              summary: "Grafana is down"
+              description: "Grafana dashboard server is unreachable"
+
+          - alert: AlertManagerDown
+            expr: up{job="alertmanager"} == 0
+            for: 2m
+            labels:
+              severity: critical
+              category: monitoring
+            annotations:
+              summary: "AlertManager is down"
+              description: "AlertManager is unreachable. Alerts may not be delivered"
+
+          - alert: PrometheusHighMemory
+            expr: process_resident_memory_bytes{job="prometheus"} / 1024 / 1024 / 1024 > 0.8
+            for: 5m
+            labels:
+              severity: warning
+              category: monitoring
+            annotations:
+              summary: "Prometheus memory usage is high"
+              description: "Prometheus is using {{ printf \"%.2f\" $value }}GB"

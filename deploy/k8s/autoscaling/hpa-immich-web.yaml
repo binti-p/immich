@@ -1,0 +1,38 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: immich-web-hpa
+  namespace: aesthetic-hub
+  annotations:
+    description: >
+      Scales Immich web frontend between 1 and 2 replicas based on CPU.
+      Web is a lightweight Node.js SSR layer; 70% CPU threshold gives
+      enough signal before request latency degrades. Max 2 replicas is
+      sufficient for the expected demo/course load (tens of concurrent users).
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: immich-web
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

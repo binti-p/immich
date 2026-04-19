@@ -37,6 +37,7 @@ export type TimelineAsset = {
   people: string[] | null;
   latitude?: number | null;
   longitude?: number | null;
+  aestheticScore: number | null;
 };
 
 export type MoveAsset = { asset: TimelineAsset; date: TimelineDate };

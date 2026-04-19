@@ -717,6 +717,7 @@ export class AssetRepository {
             'asset_exif.city',
             'asset_exif.country',
             'asset_exif.projectionType',
+            'asset.aestheticScore',
             eb.fn
               .coalesce(
                 eb
@@ -791,7 +792,12 @@ export class AssetRepository {
           )
           .$if(!!options.isTrashed, (qb) => qb.where('asset.status', '!=', AssetStatus.Deleted))
           .$if(!!options.tagId, (qb) => withTagId(qb, options.tagId!))
-          .orderBy(sql`(asset."localDateTime" AT TIME ZONE 'UTC')::date`, order)
+          // Sort by aesthetic score descending (nulls last), then by date as secondary sort
+          .orderBy(
+            sql`CASE WHEN asset."aestheticScore" IS NULL THEN 1 ELSE 0 END`,
+            order === 'desc' ? 'asc' : 'desc',
+          )
+          .orderBy('asset.aestheticScore', order)
           .orderBy('asset.fileCreatedAt', order),
       )
       .with('agg', (qb) =>
@@ -815,6 +821,7 @@ export class AssetRepository {
             eb.fn.coalesce(eb.fn('array_agg', ['ratio']), sql.lit('{}')).as('ratio'),
             eb.fn.coalesce(eb.fn('array_agg', ['status']), sql.lit('{}')).as('status'),
             eb.fn.coalesce(eb.fn('array_agg', ['thumbhash']), sql.lit('{}')).as('thumbhash'),
+            eb.fn.coalesce(eb.fn('array_agg', ['aestheticScore']), sql.lit('{}')).as('aestheticScore'),
           ])
           .$if(!!options.withCoordinates, (qb) =>
             qb.select((eb) => [
@@ -1102,4 +1109,23 @@ export class AssetRepository {
       .where('asset.id', '=', id)
       .executeTakeFirstOrThrow();
   }
+
+  /**
+   * Get all asset IDs, optionally filtered by user ID
+   * Used for batch rescoring operations
+   * @param userId Optional user ID to filter assets
+   * @returns Promise resolving to array of asset IDs
+   */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async getAllAssetIds(userId?: string): Promise<string[]> {
+    let query = this.db.selectFrom('asset').select('asset.id').where('asset.deletedAt', 'is', null);
+
+    if (userId) {
+      query = query.where('asset.ownerId', '=', asUuid(userId));
+    }
+
+    const results = await query.execute();
+    return results.map((row) => row.id);
+  }
 }
+

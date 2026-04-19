@@ -1,0 +1,45 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: immich-server-hpa
+  namespace: aesthetic-hub
+  annotations:
+    description: >
+      Scales the Immich server between 1 and 3 replicas based on CPU load.
+      Threshold of 70% CPU was chosen to allow headroom before saturation
+      given the 500m CPU limit per pod; at 70% we have ~150m spare before
+      the limit is hit, enough to absorb a request burst without OOM or
+      rate-limiting errors while a new replica starts (~30s cold-start).
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: immich-server
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

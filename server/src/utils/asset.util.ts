@@ -234,3 +234,36 @@ export const getDimensions = ({
 export const isPanorama = (asset: { projectionType: string | null; originalFileName: string }) => {
   return asset.projectionType === 'EQUIRECTANGULAR' || asset.originalFileName.toLowerCase().endsWith('.insp');
 };
+
+/**
+ * Sort assets by aesthetic score in descending order (highest scores first).
+ * Assets with null/undefined scores are placed at the end (NULLS LAST behavior).
+ * 
+ * This function performs an in-place sort and returns the sorted array.
+ * 
+ * @param assets - Array of assets with optional aestheticScore field
+ * @returns The same array, sorted by aesthetic score descending with nulls last
+ * 
+ * @example
+ * const assets = [
+ *   { id: '1', aestheticScore: 0.8 },
+ *   { id: '2', aestheticScore: null },
+ *   { id: '3', aestheticScore: 0.9 },
+ * ];
+ * sortByAestheticScore(assets);
+ * // Result: [{ id: '3', score: 0.9 }, { id: '1', score: 0.8 }, { id: '2', score: null }]
+ */
+export function sortByAestheticScore<T extends { aestheticScore?: number | null }>(assets: T[]): T[] {
+  return assets.sort((a, b) => {
+    const scoreA = a.aestheticScore;
+    const scoreB = b.aestheticScore;
+
+    // Handle null/undefined scores - place at end
+    if (scoreA == null && scoreB == null) return 0;
+    if (scoreA == null) return 1;  // a goes after b
+    if (scoreB == null) return -1; // b goes after a
+
+    // Both scores exist - sort descending (highest first)
+    return scoreB - scoreA;
+  });
+}

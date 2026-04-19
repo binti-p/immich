@@ -1,0 +1,322 @@
+# WorkflowTemplate: promote-model
+# Triggered by: the serving team's monitoring job when canary gates pass,
+#               or manually if a rollback is needed (with stage=None to demote).
+#
+# Promotion flow:
+#   Staging → Canary  (triggered after smoke test in staging namespace passes)
+#   Canary  → Production (triggered after observationWindow metrics pass)
+#
+# Rollback flow:
+#   Demote the current production model to "Archived" and re-promote the
+#   previous production version (identified by the previous-version parameter).
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: promote-model
+  namespace: argo
+  labels:
+    app.kubernetes.io/part-of: aesthetic-hub
+spec:
+  entrypoint: promote
+  serviceAccountName: argo-workflow
+  arguments:
+    parameters:
+      - name: model-name
+        value: "aesthetic-scorer"
+      - name: from-stage
+        value: "Staging"
+      - name: to-stage
+        value: "Production"
+      - name: mlflow-uri
+        value: "http://mlflow.platform.svc.cluster.local:5000"
+      - name: minio-endpoint
+        value: "http://minio.platform.svc.cluster.local:9000"
+      - name: argocd-server
+        value: "argocd-server.argocd.svc.cluster.local:443"
+      - name: rollback
+        value: "false"
+      - name: previous-version
+        value: ""
+
+  templates:
+    - name: promote
+      steps:
+        - - name: check-rollback
+            template: promote-or-rollback
+
+    - name: promote-or-rollback
+      steps:
+        - - name: do-promote
+            template: transition-model-stage
+            when: "{{workflow.parameters.rollback}} == false"
+          - name: do-rollback
+            template: rollback-model
+            when: "{{workflow.parameters.rollback}} == true"
+        - - name: sync-triton         
+            template: sync-triton-models
+            arguments:
+              parameters:
+                - name: from-stage
+                  value: "{{workflow.parameters.from-stage}}"
+                - name: to-stage
+                  value: "{{workflow.parameters.to-stage}}"
+                - name: rollback
+                  value: "{{workflow.parameters.rollback}}"
+        - - name: sync-argocd
+            template: argocd-sync
+            arguments:
+              parameters:
+                - name: to-stage
+                  value: "{{workflow.parameters.to-stage}}"
+
+    - name: transition-model-stage
+      container:
+        image: ghcr.io/mlflow/mlflow:v2.13.2
+        command: [python, -c]
+        args:
+          - |
+            import mlflow
+            from mlflow import MlflowClient
+            client = MlflowClient("{{workflow.parameters.mlflow-uri}}")
+            versions = client.get_latest_versions(
+                "{{workflow.parameters.model-name}}",
+                stages=["{{workflow.parameters.from-stage}}"]
+            )
+            if not versions:
+                raise RuntimeError(
+                    f"No model in stage {{workflow.parameters.from-stage}}"
+                )
+            v = versions[0]
+            print(f"Transitioning version {v.version} from "
+                  f"{{workflow.parameters.from-stage}} to "
+                  f"{{workflow.parameters.to-stage}}")
+            client.transition_model_version_stage(
+                name="{{workflow.parameters.model-name}}",
+                version=v.version,
+                stage="{{workflow.parameters.to-stage}}",
+                archive_existing_versions=True
+            )
+            print("Done.")
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "{{workflow.parameters.mlflow-uri}}"
+          - name: MLFLOW_S3_ENDPOINT_URL
+            value: "{{workflow.parameters.minio-endpoint}}"
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: accesskey
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: secretkey
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+
+    - name: rollback-model
+      container:
+        image: ghcr.io/mlflow/mlflow:v2.13.2
+        command: [python, -c]
+        args:
+          - |
+            import mlflow
+            from mlflow import MlflowClient
+            client = MlflowClient("{{workflow.parameters.mlflow-uri}}")
+            # Archive the bad production version
+            bad_versions = client.get_latest_versions(
+                "{{workflow.parameters.model-name}}",
+                stages=["Production"]
+            )
+            for v in bad_versions:
+                print(f"Archiving bad production version {v.version}")
+                client.transition_model_version_stage(
+                    name="{{workflow.parameters.model-name}}",
+                    version=v.version,
+                    stage="Archived"
+                )
+            # Restore the specified previous version
+            prev = "{{workflow.parameters.previous-version}}"
+            if prev:
+                print(f"Restoring version {prev} to Production")
+                client.transition_model_version_stage(
+                    name="{{workflow.parameters.model-name}}",
+                    version=prev,
+                    stage="Production"
+                )
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "{{workflow.parameters.mlflow-uri}}"
+          - name: MLFLOW_S3_ENDPOINT_URL
+            value: "{{workflow.parameters.minio-endpoint}}"
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: accesskey
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: secretkey
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+
+    - name: argocd-sync
+      inputs:
+        parameters:
+          - name: to-stage
+      container:
+        image: argoproj/argocd:v2.10.4
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            STAGE="{{inputs.parameters.to-stage}}"
+            case "$STAGE" in
+              Staging)    APP="aes-staging" ;;
+              Production) APP="aes-production" ;;
+              *)          APP="aes-canary" ;;
+            esac
+            argocd login "{{workflow.parameters.argocd-server}}" \
+              --username admin \
+              --password "$ARGOCD_PASSWORD" \
+              --insecure
+            argocd app sync "$APP" --timeout 120
+            argocd app wait "$APP" --health --timeout 120
+            echo "ArgoCD sync complete for $APP"
+        env:
+          - name: ARGOCD_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: argocd-initial-admin-secret
+                key: password
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+    
+    - name: sync-triton-models
+      inputs:
+        parameters:
+          - name: from-stage   # e.g. "staging"
+          - name: to-stage     # e.g. "canary" or "production"
+          - name: rollback
+      container:
+        image: ghcr.io/mlflow/mlflow:v2.13.2
+        command: [python, -c]
+        args:
+          - |
+            import boto3, os, json
+            from botocore.client import Config
+
+            s3 = boto3.client(
+                "s3",
+                endpoint_url=os.environ["MLFLOW_S3_ENDPOINT_URL"],
+                aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+                config=Config(signature_version="s3v4"),
+                region_name="us-east-1"
+            )
+
+            bucket = "triton-models"
+            from_stage = "{{inputs.parameters.from-stage}}".lower()
+            to_stage = "{{inputs.parameters.to-stage}}".lower()
+            is_rollback = "{{workflow.parameters.rollback}}" == "true"
+
+            # Global model never changes — only sync personalized
+            model = "personalized_mlp"
+
+            if is_rollback:
+                # Find highest version in production and delete it
+                prefix = f"production/{model}/"
+                resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
+                folders = [
+                    int(p["Prefix"].rstrip("/").split("/")[-1])
+                    for p in resp.get("CommonPrefixes", [])
+                    if p["Prefix"].rstrip("/").split("/")[-1].isdigit()
+                ]
+                if not folders:
+                    raise RuntimeError("No versioned folders found in production — cannot rollback")
+                
+                highest = max(folders)
+                if highest == 1:
+                    raise RuntimeError("Only one version exists — cannot rollback further")
+                
+                # Delete highest version
+                key = f"production/{model}/{highest}/model.onnx"
+                s3.delete_object(Bucket=bucket, Key=key)
+                print(f"Rollback: deleted production/{model}/{highest}/model.onnx")
+                print(f"Triton will fall back to version {highest - 1} within 60s")
+
+            elif to_stage == "production":
+                # Versioned copy: find N, copy to N+1
+                prefix = f"production/{model}/"
+                resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
+                folders = [
+                    int(p["Prefix"].rstrip("/").split("/")[-1])
+                    for p in resp.get("CommonPrefixes", [])
+                    if p["Prefix"].rstrip("/").split("/")[-1].isdigit()
+                ]
+                current_version = max(folders) if folders else 0
+                new_version = current_version + 1
+
+                # Copy model
+                s3.copy_object(
+                    CopySource={"Bucket": bucket, "Key": f"{from_stage}/{model}/1/model.onnx"},
+                    Bucket=bucket,
+                    Key=f"production/{model}/{new_version}/model.onnx"
+                )
+                print(f"Promoted {from_stage}/{model}/1/model.onnx → production/{model}/{new_version}/model.onnx")
+
+                # Copy user2idx.json
+                s3.copy_object(
+                    CopySource={"Bucket": bucket, "Key": f"{from_stage}/{model}/user2idx.json"},
+                    Bucket=bucket,
+                    Key=f"production/{model}/user2idx.json"
+                )
+                print(f"Copied user2idx.json to production")
+
+                # Clean up old versions — keep only last 2
+                if current_version >= 2:
+                    old_version = current_version - 1
+                    s3.delete_object(Bucket=bucket, Key=f"production/{model}/{old_version}/model.onnx")
+                    print(f"Deleted old version {old_version}")
+
+            else:
+                # Staging or canary — simple overwrite of 1/
+                s3.copy_object(
+                    CopySource={"Bucket": bucket, "Key": f"{from_stage}/{model}/1/model.onnx"},
+                    Bucket=bucket,
+                    Key=f"{to_stage}/{model}/1/model.onnx"
+                )
+                s3.copy_object(
+                    CopySource={"Bucket": bucket, "Key": f"{from_stage}/{model}/user2idx.json"},
+                    Bucket=bucket,
+                    Key=f"{to_stage}/{model}/user2idx.json"
+                )
+                print(f"Copied {from_stage} → {to_stage} (overwrite)")
+
+            print("Sync complete. Triton will pick up changes within 60s.")
+        env:
+          - name: MLFLOW_S3_ENDPOINT_URL
+            value: "{{workflow.parameters.minio-endpoint}}"
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: accesskey
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: secretkey
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi

@@ -145,4 +145,7 @@ export class AssetTable {
 
   @Column({ type: 'boolean', default: false })
   isEdited!: Generated<boolean>;
+
+  @Column({ type: 'real', nullable: true })
+  aestheticScore!: number | null;
 }

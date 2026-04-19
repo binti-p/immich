@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-web
+  namespace: aesthetic-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-web
+  template:
+    metadata:
+      labels:
+        app: immich-web
+    spec:
+      containers:
+        - name: immich-web
+          image: ghcr.io/immich-app/immich-web:release
+          env:
+            - name: IMMICH_SERVER_URL
+              value: http://immich-server:2283
+            - name: PUBLIC_IMMICH_SERVER_URL
+              value: http://immich-server:2283
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-web
+  namespace: aesthetic-hub
+spec:
+  selector:
+    app: immich-web
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30114
+  type: NodePort

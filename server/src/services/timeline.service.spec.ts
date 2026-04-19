@@ -43,6 +43,46 @@ describe(TimelineService.name, () => {
     });
   });
 
+  describe('getTimeBucketsWithTotal', () => {
+    it('should return buckets with total count', async () => {
+      mocks.asset.getTimeBuckets.mockResolvedValue([
+        { timeBucket: '2024-01-01', count: 10 },
+        { timeBucket: '2024-01-02', count: 20 },
+        { timeBucket: '2024-01-03', count: 30 },
+      ]);
+
+      await expect(sut.getTimeBucketsWithTotal(authStub.admin, {})).resolves.toEqual({
+        buckets: [
+          { timeBucket: '2024-01-01', count: 10 },
+          { timeBucket: '2024-01-02', count: 20 },
+          { timeBucket: '2024-01-03', count: 30 },
+        ],
+        totalCount: 60,
+      });
+      expect(mocks.asset.getTimeBuckets).toHaveBeenCalledWith({
+        userIds: [authStub.admin.user.id],
+      });
+    });
+
+    it('should return zero total count for empty buckets', async () => {
+      mocks.asset.getTimeBuckets.mockResolvedValue([]);
+
+      await expect(sut.getTimeBucketsWithTotal(authStub.admin, {})).resolves.toEqual({
+        buckets: [],
+        totalCount: 0,
+      });
+    });
+
+    it('should calculate total count correctly with single bucket', async () => {
+      mocks.asset.getTimeBuckets.mockResolvedValue([{ timeBucket: '2024-01-01', count: 42 }]);
+
+      await expect(sut.getTimeBucketsWithTotal(authStub.admin, {})).resolves.toEqual({
+        buckets: [{ timeBucket: '2024-01-01', count: 42 }],
+        totalCount: 42,
+      });
+    });
+  });
+
   describe('getTimeBucket', () => {
     it('should return the assets for a album time bucket if user has album.read', async () => {
       mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set(['album-id']));
