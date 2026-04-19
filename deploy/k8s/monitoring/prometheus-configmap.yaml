@@ -1,0 +1,503 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+      external_labels:
+        cluster: aesthetic-hub
+        environment: production
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+                - alertmanager:9093
+
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
+    scrape_configs:
+      # Prometheus self-scrape
+      - job_name: prometheus
+        static_configs:
+          - targets: ['localhost:9090']
+
+      # Kubernetes API server
+      - job_name: kubernetes-apiservers
+        kubernetes_sd_configs:
+          - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https
+
+      # Kubernetes nodes (kubelet)
+      - job_name: kubernetes-nodes
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+
+      # cAdvisor (container resource metrics)
+      - job_name: kubernetes-cadvisor
+        scheme: https
+        metrics_path: /metrics/cadvisor
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+
+      # Node exporter (host-level metrics)
+      - job_name: node-exporter
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [monitoring]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_endpoints_name]
+            action: keep
+            regex: node-exporter
+
+      # kube-state-metrics (Kubernetes object state)
+      - job_name: kube-state-metrics
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [monitoring]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_endpoints_name]
+            action: keep
+            regex: kube-state-metrics
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: http-metrics
+
+      # MLflow metrics
+      - job_name: mlflow
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [platform]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_endpoints_name]
+            action: keep
+            regex: mlflow
+
+      # Triton Inference Server metrics
+      - job_name: triton
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [aesthetic-hub, aesthetic-hub-staging, aesthetic-hub-canary]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_endpoints_name]
+            action: keep
+            regex: triton.*
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+
+      # Argo Workflows metrics
+      - job_name: argo-workflows
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [argo]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_endpoints_name]
+            action: keep
+            regex: argo-server
+
+      # Immich Server metrics
+      - job_name: immich-server
+        scrape_interval: 30s
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names: [aesthetic-hub]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_endpoints_name]
+            action: keep
+            regex: immich-server
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: http
+        metrics_path: /metrics
+
+      # Auto-discover all pods with prometheus annotations
+      - job_name: kubernetes-pods
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+
+  alert-rules.yml: |
+    groups:
+      - name: infrastructure
+        rules:
+          - alert: NodeHighCPU
+            expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High CPU usage on {{ $labels.instance }}"
+              description: "CPU usage is {{ printf \"%.1f\" $value }}% (threshold: 85%) on node {{ $labels.instance }}"
+
+          - alert: NodeCriticalCPU
+            expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Critical CPU usage on {{ $labels.instance }}"
+              description: "CPU usage is {{ printf \"%.1f\" $value }}% (threshold: 95%) on node {{ $labels.instance }}"
+
+          - alert: NodeHighMemory
+            expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High memory usage on {{ $labels.instance }}"
+              description: "Memory usage is {{ printf \"%.1f\" $value }}% (threshold: 85%) on node {{ $labels.instance }}"
+
+          - alert: NodeCriticalMemory
+            expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Critical memory usage on {{ $labels.instance }}"
+              description: "Memory usage is {{ printf \"%.1f\" $value }}% on node {{ $labels.instance }}. OOM risk imminent."
+
+          - alert: NodeDiskSpaceLow
+            expr: (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Low disk space on {{ $labels.instance }}"
+              description: "Disk usage is {{ printf \"%.1f\" $value }}% (threshold: 80%) on node {{ $labels.instance }}"
+
+          - alert: NodeDiskSpaceCritical
+            expr: (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) * 100 > 90
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Critical disk space on {{ $labels.instance }}"
+              description: "Disk usage is {{ printf \"%.1f\" $value }}%. Immediate action required on {{ $labels.instance }}."
+
+          - alert: NodeNotReady
+            expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kubernetes node {{ $labels.node }} is not ready"
+              description: "Node {{ $labels.node }} has been not ready for more than 1 minute."
+
+          - alert: NodeNetworkReceiveErrors
+            expr: rate(node_network_receive_errs_total[5m]) > 10
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Network receive errors on {{ $labels.instance }}"
+              description: "Interface {{ $labels.device }} on {{ $labels.instance }} is receiving {{ printf \"%.0f\" $value }} errors/s."
+
+          - alert: PodCrashLooping
+            expr: increase(kube_pod_container_status_restarts_total[10m]) > 3
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+              description: "Container {{ $labels.container }} restarted {{ $value }} times in the last 10 minutes."
+
+          - alert: PodNotReady
+            expr: kube_pod_status_ready{condition="false"} == 1
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been not ready"
+              description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has not been ready for 10 minutes."
+
+          - alert: PodStuckPending
+            expr: kube_pod_status_phase{phase="Pending"} == 1
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} stuck in Pending"
+              description: "Pod has been Pending for 15+ minutes. Check for resource pressure or image pull failures."
+
+          - alert: ContainerOOMKilled
+            expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container OOM killed in {{ $labels.namespace }}/{{ $labels.pod }}"
+              description: "Container {{ $labels.container }} was OOMKilled. Consider increasing memory limits."
+
+          - alert: PVCUsageHigh
+            expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PVC {{ $labels.persistentvolumeclaim }} usage is high"
+              description: "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} is {{ printf \"%.1f\" $value }}% full."
+
+          - alert: DeploymentReplicasMismatch
+            expr: kube_deployment_spec_replicas != kube_deployment_status_available_replicas
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replicas mismatch"
+              description: "Deployment has {{ $value }} available replicas but desired a different count for over 10 minutes."
+
+      - name: ml-pipeline
+        rules:
+          - alert: MLflowServiceDown
+            expr: up{job="mlflow"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "MLflow tracking server is down"
+              description: "MLflow is unreachable. Training runs cannot be logged. Check the mlflow pod in the platform namespace."
+
+          - alert: MinIOServiceDown
+            expr: kube_deployment_status_available_replicas{namespace="platform",deployment="minio"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "MinIO object storage is down"
+              description: "MinIO has 0 available replicas. Artifact storage and training data are inaccessible."
+
+          - alert: InferenceServiceDown
+            expr: kube_deployment_status_available_replicas{namespace="aesthetic-hub",deployment="aesthetic-scoring-production"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Aesthetic inference service is down"
+              description: "Inference deployment has 0 available replicas. Aesthetic scoring is unavailable."
+
+          - alert: InferenceHighLatency
+            expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="aesthetic-scoring-production"}[5m])) > 2
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High inference latency (p95 > 2s)"
+              description: "p95 inference latency is {{ printf \"%.2f\" $value }}s. SLA target is <2s."
+
+          - alert: InferenceErrorRateHigh
+            expr: rate(http_requests_total{job="aesthetic-scoring-production",status=~"5.."}[5m]) / rate(http_requests_total{job="aesthetic-scoring-production"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High inference error rate (>5%)"
+              description: "Inference error rate is {{ printf \"%.1f\" ($value * 100) }}% over the last 5 minutes."
+
+          - alert: InferenceLowThroughput
+            expr: rate(http_requests_total{job="aesthetic-scoring-production"}[5m]) < 0.1
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Inference service receiving very few requests"
+              description: "Inference throughput is {{ printf \"%.3f\" $value }} req/s. May indicate Immich integration is broken."
+
+          - alert: ArgoWorkflowFailed
+            expr: argo_workflows_count{status="Failed"} > 0
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Argo Workflow has failed"
+              description: "One or more Argo Workflows are in a Failed state. Check the Argo UI at http://129.114.27.253:2746"
+
+          - alert: ArgoWorkflowRunningTooLong
+            expr: argo_workflows_count{status="Running"} > 0 and argo_workflow_info{phase="Running"} * on() (time() - argo_workflow_info{phase="Running"}) > 7200
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Argo Workflow running for more than 2 hours"
+              description: "A training workflow has been running for over 2 hours. Check for hangs or data issues."
+
+          - alert: TrainingDataPipelineDown
+            expr: kube_deployment_status_available_replicas{namespace="aesthetic-hub",deployment="feature-svc"} == 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Feature service (data pipeline) is down"
+              description: "The feature-svc deployment has 0 replicas. CLIP embedding generation for new photos is stopped."
+
+      - name: application
+        rules:
+          - alert: ImmichServerDown
+            expr: kube_deployment_status_available_replicas{namespace="aesthetic-hub",deployment="immich-server"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Immich server is down"
+              description: "Immich server has 0 available replicas. Photo management is unavailable."
+
+          - alert: ImmichPostgresDown
+            expr: kube_deployment_status_available_replicas{namespace="aesthetic-hub",deployment="immich-postgres"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Immich PostgreSQL is down"
+              description: "Immich database has 0 available replicas. All Immich functionality is broken."
+
+      - name: monitoring-stack
+        rules:
+          - alert: PrometheusConfigReloadFailed
+            expr: prometheus_config_last_reload_successful == 0
+            for: 0m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Prometheus config reload failed"
+              description: "Prometheus failed to reload its configuration. Alert rules may be stale."
+
+          - alert: PrometheusTargetDown
+            expr: up == 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus target {{ $labels.job }}/{{ $labels.instance }} is down"
+              description: "Prometheus cannot scrape {{ $labels.instance }}. Metrics for this target are missing."
+
+          - alert: GrafanaDown
+            expr: kube_deployment_status_available_replicas{namespace="monitoring",deployment="grafana"} == 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Grafana is down"
+              description: "Grafana has 0 available replicas. Dashboards and alerting UI are unavailable."
+
+          - alert: AlertManagerDown
+            expr: kube_deployment_status_available_replicas{namespace="monitoring",deployment="alertmanager"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "AlertManager is down"
+              description: "AlertManager has 0 available replicas. Alerts will not be routed or deduplicated."
+      - name: aesthetic-scoring
+        rules:
+
+          - alert: ScoringServiceHighErrorRate
+            expr: |
+              sum(rate(scoring_errors_total{environment="production"}[5m]))
+              / sum(rate(scoring_latency_seconds_count{environment="production"}[5m]))
+              > 0.02
+            for: 5m
+            labels:
+              severity: critical
+              team: serving
+            annotations:
+              summary: "Scoring service error rate above 2%"
+              description: "Production scoring error rate is {{ $value | humanizePercentage }}"
+
+          - alert: ScoringServiceHighLatency
+            expr: |
+              histogram_quantile(0.95,
+                sum(rate(scoring_latency_seconds_bucket{environment="production"}[5m])) by (le)
+              ) * 1000 > 200
+            for: 5m
+            labels:
+              severity: warning
+              team: serving
+            annotations:
+              summary: "Scoring service P95 latency above 200ms"
+              description: "P95 latency is {{ $value }}ms"
+
+          - alert: HighLowConfidenceRate
+            expr: |
+              sum(rate(scoring_low_confidence_total{environment="production"}[10m]))
+              / sum(rate(scoring_latency_seconds_count{environment="production"}[10m]))
+              > 0.3
+            for: 10m
+            labels:
+              severity: warning
+              team: serving
+            annotations:
+              summary: "More than 30% of scores flagged low-confidence"
+              description: "Possible model drift or data quality issue"
+          
+          - alert: ScoreDrift
+            expr: |
+              abs(
+                avg_over_time(scoring_final_score_sum[1h])
+                /
+                avg_over_time(scoring_latency_seconds_count[1h])
+                -
+                avg_over_time(scoring_final_score_sum[7d])
+                /
+                avg_over_time(scoring_latency_seconds_count[7d])
+              ) > 0.2
+            for: 30m
+            labels:
+              severity: warning
+              team: serving
+            annotations:
+              summary: "Aesthetic score distribution has drifted"
+              description: "Mean score shifted by {{ $value | humanize }} vs 7-day baseline. Check new model behavior."

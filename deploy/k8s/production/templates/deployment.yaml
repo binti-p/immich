@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aesthetic-scoring-production
+  namespace: aesthetic-hub
+  labels:
+    app: aesthetic-scoring
+    track: production
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: aesthetic-scoring
+      track: production
+  template:
+    metadata:
+      labels:
+        app: aesthetic-scoring
+        track: production
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.scoringService.port }}"
+    spec:
+      containers:
+        - name: scoring-service
+          image: "{{ .Values.scoringService.image.repository }}:{{ .Values.scoringService.image.tag }}"
+          imagePullPolicy: {{ .Values.scoringService.image.pullPolicy }}
+          env:
+            - name: TRITON_HOST
+              value: "triton-production"
+            - name: TRITON_PORT
+              value: "{{ .Values.triton.port }}"
+            - name: ENVIRONMENT
+              value: production
+            - name: MODEL_VERSION
+              value: "v1"
+            - name: POSTGRES_HOST
+              value: "data-pipeline-postgres.aesthetic-hub.svc.cluster.local"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: "aesthetic_hub"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres123"
+              # valueFrom:
+              #   secretKeyRef:
+              #     name: data-pipeline-postgres-secret
+              #     key: password
+            - name: MODEL_URI
+              value: "{{ .Values.scoringService.modelUri }}"
+            - name: MLFLOW_TRACKING_URI
+              value: "{{ .Values.scoringService.mlflowTrackingUri }}"
+          ports:
+            - containerPort: {{ .Values.scoringService.port }}
+              name: http
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.scoringService.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.scoringService.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+{{- if .Values.triton.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-production
+  namespace: aesthetic-hub
+  labels:
+    app: triton
+    track: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: triton
+      track: production
+  template:
+    metadata:
+      labels:
+        app: triton
+        track: production
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.triton.metricsPort }}"
+    spec:
+      containers:
+        - name: triton
+          image: "{{ .Values.triton.image.repository }}:{{ .Values.triton.image.tag }}"
+          args:
+            - tritonserver
+            - --model-repository={{ .Values.triton.modelRepository }}
+            - --model-control-mode=poll
+            - --repository-poll-secs=60
+            - --allow-metrics=true
+            - --metrics-port={{ .Values.triton.metricsPort }}
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: accesskey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secretkey
+            - name: TRITON_AWS_ENDPOINT
+              value: "http://minio.platform.svc.cluster.local:9000"
+            - name: AWS_ENDPOINT_URL
+              value: "http://minio.platform.svc.cluster.local:9000"
+          ports:
+            - containerPort: {{ .Values.triton.port }}
+              name: http
+            - containerPort: 8001
+              name: grpc
+            - containerPort: {{ .Values.triton.metricsPort }}
+              name: metrics
+          resources:
+            requests:
+              cpu: {{ .Values.triton.resources.requests.cpu }}
+              memory: {{ .Values.triton.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.triton.resources.limits.cpu }}
+              memory: {{ .Values.triton.resources.limits.memory }}
+{{- end }}
+{{- if .Values.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aesthetic-scoring-production-hpa
+  namespace: aesthetic-hub
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aesthetic-scoring-production
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

@@ -67,5 +67,14 @@ describe(TimelineController.name, () => {
       expect(status).toBe(400);
       expect(body).toEqual(errorDto.badRequest('Invalid time bucket format'));
     });
+
+    // 6.3 - invalid sortBy value returns HTTP 400
+    it('should return HTTP 400 for an invalid sortBy value', async () => {
+      const { status, body } = await request(ctx.getHttpServer())
+        .get('/timeline/bucket')
+        .query({ timeBucket: '2024-01-01', sortBy: 'invalid_value' });
+      expect(status).toBe(400);
+      expect(body).toMatchObject(errorDto.badRequest());
+    });
   });
 });

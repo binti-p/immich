@@ -2,7 +2,7 @@ import { Controller, Get, Header, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Endpoint, HistoryBuilder } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
-import { TimeBucketAssetDto, TimeBucketAssetResponseDto, TimeBucketDto } from 'src/dtos/time-bucket.dto';
+import { TimeBucketAssetDto, TimeBucketAssetResponseDto, TimeBucketDto, TimeBucketsWithTotalResponseDto } from 'src/dtos/time-bucket.dto';
 import { ApiTag, Permission } from 'src/enum';
 import { Auth, Authenticated } from 'src/middleware/auth.guard';
 import { TimelineService } from 'src/services/timeline.service';
@@ -10,7 +10,7 @@ import { TimelineService } from 'src/services/timeline.service';
 @ApiTags(ApiTag.Timeline)
 @Controller('timeline')
 export class TimelineController {
-  constructor(private service: TimelineService) {}
+  constructor(private readonly service: TimelineService) {}
 
   @Get('buckets')
   @Authenticated({ permission: Permission.AssetRead, sharedLink: true })
@@ -21,6 +21,18 @@ export class TimelineController {
   })
   getTimeBuckets(@Auth() auth: AuthDto, @Query() dto: TimeBucketDto) {
     return this.service.getTimeBuckets(auth, dto);
+  }
+
+  @Get('buckets/with-total')
+  @Authenticated({ permission: Permission.AssetRead, sharedLink: true })
+  @ApiOkResponse({ type: TimeBucketsWithTotalResponseDto })
+  @Endpoint({
+    summary: 'Get time buckets with total count',
+    description: 'Retrieve a list of all time buckets with the total asset count for pagination UI.',
+    history: new HistoryBuilder().added('v1').internal('v1'),
+  })
+  getTimeBucketsWithTotal(@Auth() auth: AuthDto, @Query() dto: TimeBucketDto) {
+    return this.service.getTimeBucketsWithTotal(auth, dto);
   }
 
   @Get('bucket')

@@ -201,6 +201,7 @@ export class TimelineMonth {
           : null,
         thumbhash: bucketAssets.thumbhash[i],
         people: null, // People are not included in the bucket assets
+        aestheticScore: bucketAssets.aestheticScore?.[i] ?? null,
       };
 
       if (bucketAssets.latitude?.[i] && bucketAssets.longitude?.[i]) {

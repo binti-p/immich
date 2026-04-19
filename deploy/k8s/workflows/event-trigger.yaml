@@ -1,0 +1,69 @@
+# Argo Events: webhook EventSource + Sensor to trigger training on demand.
+# A POST to http://<node-ip>:31234/aesthetic-hub/train starts train-and-evaluate.
+# This is used by the data team's batch pipeline to signal "new training data ready".
+---
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: aesthetic-hub-webhook
+  namespace: argo-events
+spec:
+  service:
+    ports:
+      - port: 12000
+        targetPort: 12000
+  webhook:
+    aesthetic-train:
+      port: "12000"
+      endpoint: /aesthetic-hub/train
+      method: POST
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aesthetic-hub-webhook-svc
+  namespace: argo-events
+spec:
+  type: NodePort
+  selector:
+    eventsource-name: aesthetic-hub-webhook
+  ports:
+    - port: 12000
+      targetPort: 12000
+      nodePort: 31234
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: aesthetic-hub-train-sensor
+  namespace: argo-events
+spec:
+  template:
+    serviceAccountName: argo-events-sa
+  dependencies:
+    - name: webhook-dep
+      eventSourceName: aesthetic-hub-webhook
+      eventName: aesthetic-train
+  triggers:
+    - template:
+        name: trigger-train
+        argoWorkflow:
+          group: argoproj.io
+          version: v1alpha1
+          resource: workflows
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: train-on-demand-
+                namespace: argo
+              spec:
+                workflowTemplateRef:
+                  name: train-and-evaluate
+          parameters:
+            - src:
+                dependencyName: webhook-dep
+                dataKey: body.training_image
+              dest: spec.arguments.parameters.0.value

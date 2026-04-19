@@ -17,6 +17,7 @@ import { InjectKysely } from 'nestjs-kysely';
 import { LockableProperty, Stack } from 'src/database';
 import { Chunked, ChunkedArray, DummyValue, GenerateSql } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
+import { TimelineSortMode } from 'src/dtos/time-bucket.dto';
 import { AssetFileType, AssetOrder, AssetStatus, AssetType, AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
@@ -88,6 +89,7 @@ interface AssetBuilderOptions {
 
 export interface TimeBucketOptions extends AssetBuilderOptions {
   order?: AssetOrder;
+  sortBy?: TimelineSortMode;
 }
 
 export interface TimeBucketItem {
@@ -565,6 +567,14 @@ export class AssetRepository {
     return this.getById(asset.id, { exifInfo: true, faces: { person: true }, edits: true });
   }
 
+  async updateAestheticScore(assetId: string, score: number): Promise<void> {
+    await this.db
+      .updateTable('asset')
+      .set({ aestheticScore: score })
+      .where('id', '=', asUuid(assetId))
+      .execute();
+  }
+
   async remove(asset: { id: string }): Promise<void> {
     await this.db.deleteFrom('asset').where('id', '=', asUuid(asset.id)).execute();
   }
@@ -717,6 +727,7 @@ export class AssetRepository {
             'asset_exif.city',
             'asset_exif.country',
             'asset_exif.projectionType',
+            'asset.aestheticScore',
             eb.fn
               .coalesce(
                 eb
@@ -791,8 +802,20 @@ export class AssetRepository {
           )
           .$if(!!options.isTrashed, (qb) => qb.where('asset.status', '!=', AssetStatus.Deleted))
           .$if(!!options.tagId, (qb) => withTagId(qb, options.tagId!))
-          .orderBy(sql`(asset."localDateTime" AT TIME ZONE 'UTC')::date`, order)
-          .orderBy('asset.fileCreatedAt', order),
+          // Aesthetic sort: nulls last, then score DESC, then date as tiebreaker
+          .$if(options.sortBy === TimelineSortMode.Aesthetic, (qb) =>
+            qb
+              .orderBy(
+                sql`CASE WHEN asset."aestheticScore" IS NULL THEN 1 ELSE 0 END`,
+                order === 'desc' ? 'asc' : 'desc',
+              )
+              .orderBy('asset.aestheticScore', 'desc')
+              .orderBy('asset.fileCreatedAt', order),
+          )
+          // Default chronological sort
+          .$if(options.sortBy !== TimelineSortMode.Aesthetic, (qb) =>
+            qb.orderBy('asset.fileCreatedAt', order),
+          ),
       )
       .with('agg', (qb) =>
         qb
@@ -815,6 +838,7 @@ export class AssetRepository {
             eb.fn.coalesce(eb.fn('array_agg', ['ratio']), sql.lit('{}')).as('ratio'),
             eb.fn.coalesce(eb.fn('array_agg', ['status']), sql.lit('{}')).as('status'),
             eb.fn.coalesce(eb.fn('array_agg', ['thumbhash']), sql.lit('{}')).as('thumbhash'),
+            eb.fn.coalesce(eb.fn('array_agg', ['aestheticScore']), sql.lit('{}')).as('aestheticScore'),
           ])
           .$if(!!options.withCoordinates, (qb) =>
             qb.select((eb) => [
@@ -1102,4 +1126,23 @@ export class AssetRepository {
       .where('asset.id', '=', id)
       .executeTakeFirstOrThrow();
   }
+
+  /**
+   * Get all asset IDs, optionally filtered by user ID
+   * Used for batch rescoring operations
+   * @param userId Optional user ID to filter assets
+   * @returns Promise resolving to array of asset IDs
+   */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async getAllAssetIds(userId?: string): Promise<string[]> {
+    let query = this.db.selectFrom('asset').select('asset.id').where('asset.deletedAt', 'is', null);
+
+    if (userId) {
+      query = query.where('asset.ownerId', '=', asUuid(userId));
+    }
+
+    const results = await query.execute();
+    return results.map((row) => row.id);
+  }
 }
+

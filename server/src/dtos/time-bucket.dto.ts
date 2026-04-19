@@ -4,6 +4,11 @@ import { AssetOrderSchema, AssetVisibilitySchema } from 'src/enum';
 import { stringToBool } from 'src/validation';
 import z from 'zod';
 
+export enum TimelineSortMode {
+  Date = 'date',
+  Aesthetic = 'aesthetic',
+}
+
 const TimeBucketQueryBaseSchema = z
   .object({
     userId: z.uuidv4().optional().describe('Filter assets by specific user ID'),
@@ -64,6 +69,10 @@ const TimeBucketQueryBaseSchema = z
 const TimeBucketSchema = TimeBucketQueryBaseSchema;
 const TimeBucketAssetSchema = TimeBucketQueryBaseSchema.extend({
   timeBucket: z.string().describe('Time bucket identifier in YYYY-MM-DD format').meta({ example: '2024-01-01' }),
+  sortBy: z
+    .enum(TimelineSortMode)
+    .optional()
+    .describe("Sort mode for assets within the time bucket. Allowed values: 'date' (chronological, default) or 'aesthetic' (by aesthetic score descending, nulls last)."),
 }).meta({ id: 'TimeBucketAssetDto' });
 
 const stackTupleSchema = z.array(z.string()).length(2).nullable();
@@ -111,6 +120,10 @@ const TimeBucketAssetResponseSchema = z
       .array(z.number().nullable())
       .optional()
       .describe('Array of longitude coordinates extracted from EXIF GPS data'),
+    aestheticScore: z
+      .array(z.number().min(0).max(1).nullable())
+      .optional()
+      .describe('Array of aesthetic scores from ML model (0.0 to 1.0), null if not yet scored'),
   })
   .meta({ id: 'TimeBucketAssetResponseDto' });
 
@@ -124,7 +137,15 @@ const TimeBucketsResponseSchema = z
   })
   .meta({ id: 'TimeBucketsResponseDto' });
 
+const TimeBucketsWithTotalResponseSchema = z
+  .object({
+    buckets: z.array(TimeBucketsResponseSchema).describe('Array of time buckets with asset counts'),
+    totalCount: z.int().describe('Total number of assets across all time buckets').meta({ example: 1234 }),
+  })
+  .meta({ id: 'TimeBucketsWithTotalResponseDto' });
+
 export class TimeBucketDto extends createZodDto(TimeBucketSchema) {}
 export class TimeBucketAssetDto extends createZodDto(TimeBucketAssetSchema) {}
 export class TimeBucketAssetResponseDto extends createZodDto(TimeBucketAssetResponseSchema) {}
 export class TimeBucketsResponseDto extends createZodDto(TimeBucketsResponseSchema) {}
+export class TimeBucketsWithTotalResponseDto extends createZodDto(TimeBucketsWithTotalResponseSchema) {}

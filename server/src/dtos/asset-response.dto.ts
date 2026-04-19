@@ -121,6 +121,13 @@ export const AssetResponseSchema = SanitizedAssetResponseSchema.extend(
       .boolean()
       .describe('Is edited')
       .meta(new HistoryBuilder().added('v2.5.0').beta('v2.5.0').getExtensions()),
+    aestheticScore: z
+      .number()
+      .min(0)
+      .max(1)
+      .nullable()
+      .optional()
+      .describe('Aesthetic score from ML model (0.0 to 1.0), null if not yet scored'),
   }).shape,
 ).meta({ id: 'AssetResponseDto' });
 
@@ -162,6 +169,7 @@ export type MapAsset = {
   width: number | null;
   height: number | null;
   isEdited: boolean;
+  aestheticScore?: number | null;
 };
 
 export type AssetMapOptions = {
@@ -268,5 +276,6 @@ export function mapAsset(entity: MaybeDehydrated<MapAsset>, options: AssetMapOpt
     width: entity.width,
     height: entity.height,
     isEdited: entity.isEdited,
+    aestheticScore: entity.aestheticScore,
   };
 }

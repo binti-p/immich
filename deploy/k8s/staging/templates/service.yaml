@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aesthetic-scoring-staging
+  namespace: aesthetic-hub-staging
+  labels:
+    app: aesthetic-scoring
+    track: staging
+spec:
+  type: ClusterIP
+  selector:
+    app: aesthetic-scoring
+    track: staging
+  ports:
+    - name: http
+      port: {{ .Values.scoringService.port }}
+      targetPort: {{ .Values.scoringService.port }}
+{{- if .Values.triton.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-staging
+  namespace: aesthetic-hub-staging
+  labels:
+    app: triton
+    track: staging
+spec:
+  type: ClusterIP
+  selector:
+    app: triton
+    track: staging
+  ports:
+    - name: http
+      port: {{ .Values.triton.port }}
+      targetPort: {{ .Values.triton.port }}
+    - name: grpc
+      port: 8001
+      targetPort: 8001
+    - name: metrics
+      port: {{ .Values.triton.metricsPort }}
+      targetPort: {{ .Values.triton.metricsPort }}
+{{- end }}

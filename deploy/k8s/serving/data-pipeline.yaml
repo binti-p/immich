@@ -1,0 +1,231 @@
+---
+# Namespace already exists (aesthetic-hub), platform services live in platform ns.
+# Data pipeline services run in aesthetic-hub namespace alongside Immich.
+---
+# API Service — receives photo-uploaded events from Immich webhook,
+# stores interactions in PostgreSQL, exposes query endpoints.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-pipeline-api
+  namespace: aesthetic-hub
+  labels:
+    app: data-pipeline-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-pipeline-api
+  template:
+    metadata:
+      labels:
+        app: data-pipeline-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/binti-p/aesthetic-hub-data/api:latest
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: POSTGRES_HOST
+              value: data-pipeline-postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: aesthetic_hub
+            - name: POSTGRES_USER
+              value: aesthetic
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-pipeline-postgres-secret
+                  key: password
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: accesskey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secretkey
+            - name: AWS_ENDPOINT_URL
+              value: http://minio.platform.svc.cluster.local:9000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-pipeline-api
+  namespace: aesthetic-hub
+spec:
+  selector:
+    app: data-pipeline-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+# Feature Service — computes CLIP embeddings for new Immich photos,
+# stores them in PostgreSQL and MinIO for the training pipeline.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feature-svc
+  namespace: aesthetic-hub
+  labels:
+    app: feature-svc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: feature-svc
+  template:
+    metadata:
+      labels:
+        app: feature-svc
+    spec:
+      containers:
+        - name: feature-svc
+          image: ghcr.io/binti-p/aesthetic-hub-data/feature-svc:latest
+          ports:
+            - containerPort: 8001
+              name: http
+          env:
+            - name: POSTGRES_HOST
+              value: data-pipeline-postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: aesthetic_hub
+            - name: POSTGRES_USER
+              value: aesthetic
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-pipeline-postgres-secret
+                  key: password
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: accesskey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secretkey
+            - name: AWS_ENDPOINT_URL
+              value: http://minio.platform.svc.cluster.local:9000
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            failureThreshold: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feature-svc
+  namespace: aesthetic-hub
+spec:
+  selector:
+    app: feature-svc
+  ports:
+    - port: 8001
+      targetPort: 8001
+---
+# PostgreSQL for data pipeline — stores interactions and embedding metadata.
+# Separate from Immich's PostgreSQL to avoid schema conflicts.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-pipeline-postgres-pvc
+  namespace: aesthetic-hub
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-pipeline-postgres
+  namespace: aesthetic-hub
+  labels:
+    app: data-pipeline-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-pipeline-postgres
+  template:
+    metadata:
+      labels:
+        app: data-pipeline-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_DB
+              value: aesthetic_hub
+            - name: POSTGRES_USER
+              value: aesthetic
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: data-pipeline-postgres-secret
+                  key: password
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: data-pipeline-postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-pipeline-postgres
+  namespace: aesthetic-hub
+spec:
+  selector:
+    app: data-pipeline-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

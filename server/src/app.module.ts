@@ -20,6 +20,10 @@ import { ErrorInterceptor } from 'src/middleware/error.interceptor';
 import { FileUploadInterceptor } from 'src/middleware/file-upload.interceptor';
 import { GlobalExceptionFilter } from 'src/middleware/global-exception.filter';
 import { LoggingInterceptor } from 'src/middleware/logging.interceptor';
+import { AestheticIntegrationController } from 'src/modules/aesthetic-integration/aesthetic-integration.controller';
+import { AestheticIntegrationService } from 'src/modules/aesthetic-integration/aesthetic-integration.service';
+import { DataPipelineRepository } from 'src/modules/aesthetic-integration/data-pipeline.repository';
+import { WebhookService } from 'src/modules/aesthetic-integration/webhook.service';
 import { repositories } from 'src/repositories';
 import { AppRepository } from 'src/repositories/app.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
@@ -40,7 +44,10 @@ import { QueueService } from 'src/services/queue.service';
 import { getKyselyConfig } from 'src/utils/database';
 import { configureUserAgent } from 'src/utils/fetch';
 
-const common = [...repositories, ...services, GlobalExceptionFilter];
+// Aesthetic integration components
+const aestheticProviders = [AestheticIntegrationService, DataPipelineRepository, WebhookService];
+
+const common = [...repositories, ...services, ...aestheticProviders, GlobalExceptionFilter];
 
 const commonMiddleware = [
   { provide: APP_FILTER, useClass: GlobalExceptionFilter },
@@ -103,7 +110,7 @@ export class BaseModule implements OnModuleInit, OnModuleDestroy {
 
 @Module({
   imports: [...bullImports, ...commonImports, ScheduleModule.forRoot()],
-  controllers: [...controllers],
+  controllers: [...controllers, AestheticIntegrationController],
   providers: [...common, ...apiMiddleware, { provide: IWorker, useValue: ImmichWorker.Api }],
 })
 export class ApiModule extends BaseModule {}

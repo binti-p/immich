@@ -171,9 +171,18 @@ const assetEntity = Object.freeze({
 describe(AssetMediaService.name, () => {
   let sut: AssetMediaService;
   let mocks: ServiceMocks;
+  let aestheticIntegrationMock: { notifyFeatureService: any };
 
   beforeEach(() => {
     ({ sut, mocks } = newTestService(AssetMediaService));
+    
+    // Mock the AestheticIntegrationService
+    aestheticIntegrationMock = {
+      notifyFeatureService: vitest.fn().mockResolvedValue(undefined),
+    };
+    
+    // Inject the mock into the service
+    (sut as any).aestheticIntegrationService = aestheticIntegrationMock;
   });
 
   describe('getUploadAssetIdByChecksum', () => {

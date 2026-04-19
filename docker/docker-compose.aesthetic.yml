@@ -1,0 +1,225 @@
+name: immich-aesthetic
+
+services:
+  # ============================================================================
+  # Immich Core Services
+  # ============================================================================
+  
+  immich-server:
+    container_name: immich_server
+    image: immich-server-dev:latest
+    build:
+      context: ../
+      dockerfile: server/Dockerfile
+    volumes:
+      - ${UPLOAD_LOCATION:-../uploads}:/data
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      # Immich Database
+      DB_HOSTNAME: immich_postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_DATABASE_NAME: ${DB_DATABASE_NAME:-immich}
+      
+      # Redis
+      REDIS_HOSTNAME: immich_redis
+      REDIS_PORT: 6379
+      
+      # Feature Service (Scoring Service)
+      FEATURE_SERVICE_URL: http://scoring-service:8000
+      ENABLE_AESTHETIC_SCORING: ${ENABLE_AESTHETIC_SCORING:-true}
+      
+      # Logging
+      IMMICH_LOG_LEVEL: ${IMMICH_LOG_LEVEL:-log}
+      IMMICH_LOG_FORMAT: ${IMMICH_LOG_FORMAT:-json}
+      
+    ports:
+      - '2283:2283'
+    depends_on:
+      immich_postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      scoring-service:
+        condition: service_started
+      immich-machine-learning:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:2283/api/server-info/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  immich-web:
+    container_name: immich_web
+    image: ghcr.io/immich-app/immich-web:${IMMICH_VERSION:-release}
+    environment:
+      IMMICH_SERVER_URL: http://localhost:2283
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - '3000:3000'
+    depends_on:
+      - immich-server
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: immich-machine-learning-dev:latest
+    build:
+      context: ../machine-learning
+      dockerfile: Dockerfile
+      args:
+        - DEVICE=cpu
+    ports:
+      - 3003:3003
+    volumes:
+      - model-cache:/cache
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+
+  redis:
+    container_name: immich_redis
+    image: docker.io/valkey/valkey:9@sha256:3b55fbaa0cd93cf0d9d961f405e4dfcc70efe325e2d84da207a0a8e6d8fde4f9
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  immich_postgres:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      - ${DB_DATA_LOCATION:-../postgres-data}:/var/lib/postgresql/data
+    shm_size: 128mb
+    ports:
+      - '5432:5432'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE_NAME:-immich}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Aesthetic Scoring Services
+  # ============================================================================
+
+  adminer:
+    container_name: immich_adminer
+    image: adminer:latest
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    depends_on:
+      - immich_postgres
+
+  scoring-service:
+    container_name: scoring_service
+    build:
+      context: ../scoring-service
+      dockerfile: Dockerfile
+    environment:
+      # Point scoring service at the Immich postgres DB
+      POSTGRES_HOST: immich_postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      TRITON_HOST: triton
+      TRITON_PORT: 8000
+      LOG_LEVEL: ${SCORING_LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      MODEL_VERSION: ${MODEL_VERSION:-stub-v1}
+      IMMICH_SERVER_URL: http://immich_server:2283
+    ports:
+      - '8001:8000'
+    volumes:
+      - ${UPLOAD_LOCATION:-../uploads}:/data:ro
+    depends_on:
+      immich_postgres:
+        condition: service_healthy
+      triton:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  triton:
+    container_name: triton
+    build:
+      context: ../triton-server
+      dockerfile: Dockerfile
+    volumes:
+      - ../triton-models:/models
+    environment:
+      MODEL_REPOSITORY: /models
+    ports:
+      - '8010:8000'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/v2/health/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ============================================================================
+  # Monitoring (Optional)
+  # ============================================================================
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    volumes:
+      - ../deploy/k8s/monitoring/prometheus-configmap.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - '9090:9090'
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../deploy/k8s/monitoring/immich-grafana-dashboard.json:/etc/grafana/provisioning/dashboards/immich.json:ro
+    ports:
+      - '3001:3000'
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+volumes:
+  model-cache:
+  prometheus-data:
+  grafana-data:

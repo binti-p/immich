@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AuthDto } from 'src/dtos/auth.dto';
-import { TimeBucketAssetDto, TimeBucketDto, TimeBucketsResponseDto } from 'src/dtos/time-bucket.dto';
+import { TimeBucketAssetDto, TimeBucketDto, TimeBucketsResponseDto, TimeBucketsWithTotalResponseDto } from 'src/dtos/time-bucket.dto';
 import { AssetVisibility, Permission } from 'src/enum';
 import { TimeBucketOptions } from 'src/repositories/asset.repository';
 import { BaseService } from 'src/services/base.service';
@@ -13,6 +13,28 @@ export class TimelineService extends BaseService {
     await this.timeBucketChecks(auth, dto);
     const timeBucketOptions = await this.buildTimeBucketOptions(auth, dto);
     return await this.assetRepository.getTimeBuckets(timeBucketOptions);
+  }
+
+  /**
+   * Get time buckets with total asset count for pagination UI.
+   * This method returns both the time buckets and the total count of assets across all buckets.
+   * 
+   * @param auth - Authentication context
+   * @param dto - Time bucket query parameters
+   * @returns Object containing buckets array and totalCount
+   */
+  async getTimeBucketsWithTotal(auth: AuthDto, dto: TimeBucketDto): Promise<TimeBucketsWithTotalResponseDto> {
+    await this.timeBucketChecks(auth, dto);
+    const timeBucketOptions = await this.buildTimeBucketOptions(auth, dto);
+    const buckets = await this.assetRepository.getTimeBuckets(timeBucketOptions);
+    
+    // Calculate total count by summing all bucket counts
+    const totalCount = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+    
+    return {
+      buckets,
+      totalCount,
+    };
   }
 
   // pre-jsonified response

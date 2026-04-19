@@ -1,0 +1,32 @@
+name: "personalized_mlp"
+backend: "onnxruntime"
+max_batch_size: 128
+input [
+  {
+    name: "image_embedding"
+    data_type: TYPE_FP32
+    dims: [768]
+  },
+  {
+    name: "user_embedding"
+    data_type: TYPE_FP32
+    dims: [64]
+  }
+]
+output [
+  {
+    name: "output"
+    data_type: TYPE_FP32
+    dims: [1]
+  }
+]
+instance_group [
+  {
+    count: 8
+    kind: KIND_CPU
+  }
+]
+dynamic_batching {
+  preferred_batch_size: [4, 8, 16, 32, 64, 128]
+  max_queue_delay_microseconds: 50
+}

@@ -29,6 +29,58 @@ import {
   StorageFolder,
 } from 'src/enum';
 import { AuthRequest } from 'src/middleware/auth.guard';
+import { AestheticIntegrationService } from 'src/modules/aesthetic-integration/aesthetic-integration.service';
+import { AccessRepository } from 'src/repositories/access.repository';
+import { ActivityRepository } from 'src/repositories/activity.repository';
+import { AlbumUserRepository } from 'src/repositories/album-user.repository';
+import { AlbumRepository } from 'src/repositories/album.repository';
+import { ApiKeyRepository } from 'src/repositories/api-key.repository';
+import { AppRepository } from 'src/repositories/app.repository';
+import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
+import { AssetJobRepository } from 'src/repositories/asset-job.repository';
+import { AssetRepository } from 'src/repositories/asset.repository';
+import { ConfigRepository } from 'src/repositories/config.repository';
+import { CronRepository } from 'src/repositories/cron.repository';
+import { CryptoRepository } from 'src/repositories/crypto.repository';
+import { DatabaseRepository } from 'src/repositories/database.repository';
+import { DownloadRepository } from 'src/repositories/download.repository';
+import { DuplicateRepository } from 'src/repositories/duplicate.repository';
+import { EmailRepository } from 'src/repositories/email.repository';
+import { EventRepository } from 'src/repositories/event.repository';
+import { JobRepository } from 'src/repositories/job.repository';
+import { LibraryRepository } from 'src/repositories/library.repository';
+import { LoggingRepository } from 'src/repositories/logging.repository';
+import { MachineLearningRepository } from 'src/repositories/machine-learning.repository';
+import { MapRepository } from 'src/repositories/map.repository';
+import { MediaRepository } from 'src/repositories/media.repository';
+import { MemoryRepository } from 'src/repositories/memory.repository';
+import { MetadataRepository } from 'src/repositories/metadata.repository';
+import { MoveRepository } from 'src/repositories/move.repository';
+import { NotificationRepository } from 'src/repositories/notification.repository';
+import { OAuthRepository } from 'src/repositories/oauth.repository';
+import { OcrRepository } from 'src/repositories/ocr.repository';
+import { PartnerRepository } from 'src/repositories/partner.repository';
+import { PersonRepository } from 'src/repositories/person.repository';
+import { PluginRepository } from 'src/repositories/plugin.repository';
+import { ProcessRepository } from 'src/repositories/process.repository';
+import { SearchRepository } from 'src/repositories/search.repository';
+import { ServerInfoRepository } from 'src/repositories/server-info.repository';
+import { SessionRepository } from 'src/repositories/session.repository';
+import { SharedLinkAssetRepository } from 'src/repositories/shared-link-asset.repository';
+import { SharedLinkRepository } from 'src/repositories/shared-link.repository';
+import { StackRepository } from 'src/repositories/stack.repository';
+import { StorageRepository } from 'src/repositories/storage.repository';
+import { SyncCheckpointRepository } from 'src/repositories/sync-checkpoint.repository';
+import { SyncRepository } from 'src/repositories/sync.repository';
+import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
+import { TagRepository } from 'src/repositories/tag.repository';
+import { TelemetryRepository } from 'src/repositories/telemetry.repository';
+import { TrashRepository } from 'src/repositories/trash.repository';
+import { UserRepository } from 'src/repositories/user.repository';
+import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
+import { ViewRepository } from 'src/repositories/view-repository';
+import { WebsocketRepository } from 'src/repositories/websocket.repository';
+import { WorkflowRepository } from 'src/repositories/workflow.repository';
 import { BaseService } from 'src/services/base.service';
 import { UploadFile, UploadRequest } from 'src/types';
 import { requireUploadAccess } from 'src/utils/access';
@@ -44,6 +96,115 @@ export interface AssetMediaRedirectResponse {
 
 @Injectable()
 export class AssetMediaService extends BaseService {
+  constructor(
+    logger: LoggingRepository,
+    accessRepository: AccessRepository,
+    activityRepository: ActivityRepository,
+    albumRepository: AlbumRepository,
+    albumUserRepository: AlbumUserRepository,
+    apiKeyRepository: ApiKeyRepository,
+    appRepository: AppRepository,
+    assetRepository: AssetRepository,
+    assetEditRepository: AssetEditRepository,
+    assetJobRepository: AssetJobRepository,
+    configRepository: ConfigRepository,
+    cronRepository: CronRepository,
+    cryptoRepository: CryptoRepository,
+    databaseRepository: DatabaseRepository,
+    downloadRepository: DownloadRepository,
+    duplicateRepository: DuplicateRepository,
+    emailRepository: EmailRepository,
+    eventRepository: EventRepository,
+    jobRepository: JobRepository,
+    libraryRepository: LibraryRepository,
+    machineLearningRepository: MachineLearningRepository,
+    mapRepository: MapRepository,
+    mediaRepository: MediaRepository,
+    memoryRepository: MemoryRepository,
+    metadataRepository: MetadataRepository,
+    moveRepository: MoveRepository,
+    notificationRepository: NotificationRepository,
+    oauthRepository: OAuthRepository,
+    ocrRepository: OcrRepository,
+    partnerRepository: PartnerRepository,
+    personRepository: PersonRepository,
+    pluginRepository: PluginRepository,
+    processRepository: ProcessRepository,
+    searchRepository: SearchRepository,
+    serverInfoRepository: ServerInfoRepository,
+    sessionRepository: SessionRepository,
+    sharedLinkRepository: SharedLinkRepository,
+    sharedLinkAssetRepository: SharedLinkAssetRepository,
+    stackRepository: StackRepository,
+    storageRepository: StorageRepository,
+    syncRepository: SyncRepository,
+    syncCheckpointRepository: SyncCheckpointRepository,
+    systemMetadataRepository: SystemMetadataRepository,
+    tagRepository: TagRepository,
+    telemetryRepository: TelemetryRepository,
+    trashRepository: TrashRepository,
+    userRepository: UserRepository,
+    versionRepository: VersionHistoryRepository,
+    viewRepository: ViewRepository,
+    websocketRepository: WebsocketRepository,
+    workflowRepository: WorkflowRepository,
+    private readonly aestheticIntegrationService: AestheticIntegrationService,
+  ) {
+    super(
+      logger,
+      accessRepository,
+      activityRepository,
+      albumRepository,
+      albumUserRepository,
+      apiKeyRepository,
+      appRepository,
+      assetRepository,
+      assetEditRepository,
+      assetJobRepository,
+      configRepository,
+      cronRepository,
+      cryptoRepository,
+      databaseRepository,
+      downloadRepository,
+      duplicateRepository,
+      emailRepository,
+      eventRepository,
+      jobRepository,
+      libraryRepository,
+      machineLearningRepository,
+      mapRepository,
+      mediaRepository,
+      memoryRepository,
+      metadataRepository,
+      moveRepository,
+      notificationRepository,
+      oauthRepository,
+      ocrRepository,
+      partnerRepository,
+      personRepository,
+      pluginRepository,
+      processRepository,
+      searchRepository,
+      serverInfoRepository,
+      sessionRepository,
+      sharedLinkRepository,
+      sharedLinkAssetRepository,
+      stackRepository,
+      storageRepository,
+      syncRepository,
+      syncCheckpointRepository,
+      systemMetadataRepository,
+      tagRepository,
+      telemetryRepository,
+      trashRepository,
+      userRepository,
+      versionRepository,
+      viewRepository,
+      websocketRepository,
+      workflowRepository,
+    );
+  }
+
   async getUploadAssetIdByChecksum(auth: AuthDto, checksum?: string): Promise<AssetMediaResponseDto | undefined> {
     if (!checksum) {
       return;
@@ -153,6 +314,14 @@ export class AssetMediaService extends BaseService {
       }
 
       await this.userRepository.updateUsage(auth.user.id, file.size);
+
+      // Trigger aesthetic scoring pipeline (async, non-blocking)
+      // Requirements: 3.1, 3.2, 3.3, 3.5
+      await this.aestheticIntegrationService.notifyFeatureService(
+        asset.id,
+        asset.ownerId,
+        asset.originalPath,
+      );
 
       return { id: asset.id, status: AssetMediaStatus.CREATED };
     } catch (error: any) {

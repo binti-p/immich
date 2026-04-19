@@ -1,0 +1,40 @@
+replicaCount: 1
+
+scoringService:
+  image:
+    repository: somaditya24/aesthetic-scoring-service
+    tag: v3
+    pullPolicy: IfNotPresent
+  port: 8000                                              # was 8080
+  modelUri: "models:/aesthetic-scorer/production"
+  mlflowTrackingUri: "http://mlflow.platform.svc.cluster.local:5000"
+
+triton:
+  enabled: true
+  image:
+    repository: nvcr.io/nvidia/tritonserver
+    tag: "24.10-py3"
+  port: 8000
+  metricsPort: 8002
+  modelRepository: "s3://triton-models/production"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70

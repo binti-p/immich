@@ -73,6 +73,12 @@ import { UserMetadataTable } from 'src/schema/tables/user-metadata.table';
 import { UserTable } from 'src/schema/tables/user.table';
 import { VersionHistoryTable } from 'src/schema/tables/version-history.table';
 import { WorkflowActionTable, WorkflowFilterTable, WorkflowTable } from 'src/schema/tables/workflow.table';
+import { AestheticScoresTable } from 'src/schema/tables/aesthetic-scores.table';
+import { InferenceLogTable } from 'src/schema/tables/inference-log.table';
+import { InteractionEventsTable } from 'src/schema/tables/interaction-events.table';
+import { ModelVersionsTable } from 'src/schema/tables/model-versions.table';
+import { UserEmbeddingsTable } from 'src/schema/tables/user-embeddings.table';
+import { UserInteractionCountsTable } from 'src/schema/tables/user-interaction-counts.table';
 
 @Extensions(['uuid-ossp', 'unaccent', 'cube', 'earthdistance', 'pg_trgm', 'plpgsql'])
 @Database({ name: 'immich' })
@@ -135,6 +141,13 @@ export class ImmichDatabase {
     WorkflowTable,
     WorkflowFilterTable,
     WorkflowActionTable,
+    // Aesthetic scoring tables
+    ModelVersionsTable,
+    UserEmbeddingsTable,
+    UserInteractionCountsTable,
+    InteractionEventsTable,
+    InferenceLogTable,
+    AestheticScoresTable,
   ];
 
   functions = [
@@ -251,4 +264,12 @@ export interface DB {
   workflow: WorkflowTable;
   workflow_filter: WorkflowFilterTable;
   workflow_action: WorkflowActionTable;
+
+  // Aesthetic scoring tables
+  model_versions: ModelVersionsTable;
+  user_embeddings: UserEmbeddingsTable;
+  user_interaction_counts: UserInteractionCountsTable;
+  interaction_events: InteractionEventsTable;
+  inference_log: InferenceLogTable;
+  aesthetic_scores: AestheticScoresTable;
 }

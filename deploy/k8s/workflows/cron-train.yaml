@@ -1,0 +1,38 @@
+# CronWorkflow: scheduled weekly retraining
+# Runs every Sunday at 02:00 UTC, which is low-traffic time.
+# Justification: the AVA dataset is static; new training data comes from
+# user feedback accumulated over the prior week (ratings on scored photos).
+# A weekly cadence balances freshness against GPU cost.
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: cron-aesthetic-train
+  namespace: argo
+  labels:
+    app.kubernetes.io/part-of: aesthetic-hub
+spec:
+  schedule: "0 2 * * 0"
+  timezone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: train-and-evaluate
+    arguments:
+      parameters:
+        - name: training-image
+          value: "localhost:5000/aesthetic-training:latest"
+        - name: mlflow-uri
+          value: "http://mlflow.platform.svc.cluster.local:5000"
+        - name: minio-endpoint
+          value: "http://minio.platform.svc.cluster.local:9000"
+        - name: data-bucket
+          value: "aesthetic-hub-data"
+        - name: model-name
+          value: "aesthetic-scorer"
+        - name: min-spearman-r
+          value: "0.70"
+        - name: min-ndcg-at-10
+          value: "0.65"

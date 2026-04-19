@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+      # Generic webhook receiver — swap for Slack/PagerDuty in production
+      # slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+
+    templates:
+      - '/etc/alertmanager/templates/*.tmpl'
+
+    route:
+      group_by: ['alertname', 'cluster', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+      receiver: default-receiver
+      routes:
+        # Critical alerts page immediately
+        - match:
+            severity: critical
+          receiver: critical-receiver
+          group_wait: 10s
+          repeat_interval: 1h
+
+        # ML pipeline alerts go to separate channel
+        - match_re:
+            alertname: (MLflow.*|Triton.*|ArgoWorkflow.*)
+          receiver: ml-pipeline-receiver
+          group_wait: 30s
+          repeat_interval: 4h
+
+    receivers:
+      - name: default-receiver
+        webhook_configs:
+          - url: 'http://localhost:9999/alerts'
+            send_resolved: true
+
+      - name: critical-receiver
+        webhook_configs:
+          - url: 'http://localhost:9999/alerts/critical'
+            send_resolved: true
+
+      - name: ml-pipeline-receiver
+        webhook_configs:
+          - url: 'http://localhost:9999/alerts/ml'
+            send_resolved: true
+
+    inhibit_rules:
+      # If a node is down, suppress pod/deployment alerts from that node
+      - source_match:
+          severity: critical
+          alertname: NodeNotReady
+        target_match_re:
+          alertname: (PodNotReady|PodCrashLooping|DeploymentReplicasMismatch)
+        equal: ['instance']
