@@ -1,20 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { ConfigRepository } from 'src/repositories/config.repository';
-import { LoggingRepository } from 'src/repositories/logging.repository';
 import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { UploadWebhookPayload } from './dto/aesthetic-score.dto';
 
 @Injectable()
 export class WebhookService {
-  private readonly logger = new LoggingRepository(undefined, undefined);
+  private readonly logger = new Logger(WebhookService.name);
 
   constructor(
-    private readonly configRepository: ConfigRepository,
-    private readonly telemetryRepository: TelemetryRepository,
-  ) {
-    this.logger.setContext(WebhookService.name);
-  }
+    @Optional() private readonly telemetryRepository?: TelemetryRepository,
+  ) {}
 
   async sendAsync(payload: UploadWebhookPayload): Promise<void> {
     const featureServiceUrl = process.env.FEATURE_SERVICE_URL;
@@ -67,10 +62,11 @@ export class WebhookService {
     } finally {
       // Track metrics: upload event counter and Feature Service request duration
       // Requirements: 14.2, 14.3
-      const duration = (performance.now() - startTime) / 1000; // Convert to seconds
-
-      this.telemetryRepository.api.addToCounter(`immich_upload_events_total.${status}`, 1);
-      this.telemetryRepository.api.addToHistogram('immich_feature_service_request_duration_seconds', duration);
+      if (this.telemetryRepository) {
+        const duration = (performance.now() - startTime) / 1000; // Convert to seconds
+        this.telemetryRepository.api.addToCounter(`immich_upload_events_total.${status}`, 1);
+        this.telemetryRepository.api.addToHistogram('immich_feature_service_request_duration_seconds', duration);
+      }
     }
   }
 

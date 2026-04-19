@@ -1,24 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { AssetRepository } from 'src/repositories/asset.repository';
-import { ConfigRepository } from 'src/repositories/config.repository';
-import { LoggingRepository } from 'src/repositories/logging.repository';
 import { AestheticScoreDto, RescoreAllResponseDto, ScoreCallbackPayload, UploadWebhookPayload } from './dto/aesthetic-score.dto';
 import { DataPipelineRepository } from './data-pipeline.repository';
 import { WebhookService } from './webhook.service';
 
 @Injectable()
 export class AestheticIntegrationService {
-  private readonly logger = new LoggingRepository(undefined, undefined);
+  private readonly logger = new Logger(AestheticIntegrationService.name);
 
   constructor(
     private readonly webhookService: WebhookService,
     private readonly dataPipelineRepo: DataPipelineRepository,
-    private readonly configRepository: ConfigRepository,
     private readonly assetRepository: AssetRepository,
-  ) {
-    this.logger.setContext(AestheticIntegrationService.name);
-  }
+  ) {}
 
   async getScoresForAssets(assetIds: string[]): Promise<Map<string, AestheticScoreDto>> {
     // Handle empty input gracefully

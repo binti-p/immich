@@ -7,7 +7,10 @@ services:
   
   immich-server:
     container_name: immich_server
-    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-release}
+    image: immich-server-dev:latest
+    build:
+      context: ../
+      dockerfile: server/Dockerfile
     volumes:
       - ${UPLOAD_LOCATION:-../uploads}:/data
       - /etc/localtime:/etc/localtime:ro
@@ -38,8 +41,6 @@ services:
       IMMICH_LOG_LEVEL: ${IMMICH_LOG_LEVEL:-log}
       IMMICH_LOG_FORMAT: ${IMMICH_LOG_FORMAT:-json}
       
-      # Disable ML features
-      IMMICH_MACHINE_LEARNING_ENABLED: false
     ports:
       - '2283:2283'
     depends_on:
@@ -50,6 +51,8 @@ services:
       data_pipeline_postgres:
         condition: service_healthy
       scoring-service:
+        condition: service_started
+      immich-machine-learning:
         condition: service_started
     restart: unless-stopped
     healthcheck:
@@ -79,6 +82,22 @@ services:
       timeout: 10s
       retries: 3
 
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: immich-machine-learning-dev:latest
+    build:
+      context: ../machine-learning
+      dockerfile: Dockerfile
+      args:
+        - DEVICE=cpu
+    ports:
+      - 3003:3003
+    volumes:
+      - model-cache:/cache
+    restart: unless-stopped
+    healthcheck:
+      disable: false
+
   redis:
     container_name: immich_redis
     image: docker.io/valkey/valkey:9@sha256:3b55fbaa0cd93cf0d9d961f405e4dfcc70efe325e2d84da207a0a8e6d8fde4f9
@@ -100,6 +119,8 @@ services:
     volumes:
       - ${DB_DATA_LOCATION:-../postgres-data}:/var/lib/postgresql/data
     shm_size: 128mb
+    ports:
+      - '5432:5432'
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE_NAME:-immich}"]
@@ -110,6 +131,15 @@ services:
   # ============================================================================
   # Aesthetic Scoring Services
   # ============================================================================
+
+  adminer:
+    container_name: immich_adminer
+    image: adminer:latest
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    depends_on:
+      - immich_postgres
 
   scoring-service:
     container_name: scoring_service
@@ -219,5 +249,6 @@ services:
       - monitoring
 
 volumes:
+  model-cache:
   prometheus-data:
   grafana-data:
