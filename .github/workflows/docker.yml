@@ -115,23 +115,34 @@ jobs:
     name: Build and Push Server
     needs: pre-job
     if: ${{ fromJSON(needs.pre-job.outputs.should_run).server == true }}
-    uses: immich-app/devtools/.github/workflows/multi-runner-build.yml@61a0fc2b41524edcc7c9fffb8bb178e6b0ccf21d # multi-runner-build-workflow-v2.3.0
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
       packages: write
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-    with:
-      image: immich-server
-      context: .
-      dockerfile: server/Dockerfile
-      dockerhub-push: false
-      build-args: |
-        DEVICE=cpu
-        PUBLIC_IMMICH_SERVER_URL=http://129.114.27.253:32081
-        CACHE_BUST=${{ github.run_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: server/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/binti-p/immich/immich-server:latest
+          no-cache: true
+          build-args: |
+            DEVICE=cpu
+            PUBLIC_IMMICH_SERVER_URL=http://129.114.27.253:32081
 
   success-check-server:
     name: Docker Build & Push Server Success
