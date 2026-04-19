@@ -14,6 +14,9 @@ export class DataPipelineRepository {
 
   constructor(@InjectKysely() private readonly db: Kysely<DB>) {}
 
+  /**
+   * Retrieve aesthetic scores for a batch of asset IDs.
+   */
   async getScoresByAssetIds(assetIds: string[]): Promise<AestheticScoreDto[]> {
     if (assetIds.length === 0) {
       return [];
@@ -41,10 +44,10 @@ export class DataPipelineRepository {
         assetId: row.asset_id,
         userId: row.user_id,
         score: row.score,
-        globalScore: row.global_score,
-        personalizedScore: row.personalized_score,
-        alpha: row.alpha,
-        modelVersion: row.model_version,
+        globalScore: row.score,       // single score column — use as both
+        personalizedScore: null,
+        alpha: row.alpha ?? 0,
+        modelVersion: row.model_version ?? '',
         scoredAt: row.scored_at,
       }));
     } catch (error) {
