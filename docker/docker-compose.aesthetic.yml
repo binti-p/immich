@@ -127,6 +127,7 @@ services:
       LOG_LEVEL: ${SCORING_LOG_LEVEL:-INFO}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       MODEL_VERSION: ${MODEL_VERSION:-stub-v1}
+      IMMICH_SERVER_URL: http://immich_server:2283
     ports:
       - '8001:8000'
     volumes:

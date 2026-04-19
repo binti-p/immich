@@ -567,6 +567,14 @@ export class AssetRepository {
     return this.getById(asset.id, { exifInfo: true, faces: { person: true }, edits: true });
   }
 
+  async updateAestheticScore(assetId: string, score: number): Promise<void> {
+    await this.db
+      .updateTable('asset')
+      .set({ aestheticScore: score })
+      .where('id', '=', asUuid(assetId))
+      .execute();
+  }
+
   async remove(asset: { id: string }): Promise<void> {
     await this.db.deleteFrom('asset').where('id', '=', asUuid(asset.id)).execute();
   }

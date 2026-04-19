@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
-import { AestheticScoreDto, RescoreAllResponseDto, UploadWebhookPayload } from './dto/aesthetic-score.dto';
+import { AestheticScoreDto, RescoreAllResponseDto, ScoreCallbackPayload, UploadWebhookPayload } from './dto/aesthetic-score.dto';
 import { DataPipelineRepository } from './data-pipeline.repository';
 import { WebhookService } from './webhook.service';
 
@@ -66,6 +66,24 @@ export class AestheticIntegrationService {
         userId,
       });
     });
+  }
+
+  async receiveScoreCallback(payload: ScoreCallbackPayload): Promise<void> {
+    const { asset_id, score } = payload;
+
+    if (score < 0 || score > 1) {
+      this.logger.warn(`Received out-of-range score ${score} for asset ${asset_id}, clamping`);
+    }
+
+    const clampedScore = Math.min(1, Math.max(0, score));
+
+    try {
+      await this.assetRepository.updateAestheticScore(asset_id, clampedScore);
+      this.logger.debug(`Updated aestheticScore=${clampedScore} for asset ${asset_id}`);
+    } catch (error) {
+      this.logger.error(`Failed to update aestheticScore for asset ${asset_id}: ${error instanceof Error ? error.message : error}`);
+      throw error;
+    }
   }
 
   async rescoreAll(userId?: string): Promise<RescoreAllResponseDto> {
