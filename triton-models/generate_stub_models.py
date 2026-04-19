@@ -30,7 +30,7 @@ try:
         def __init__(self):
             super().__init__()
             self.net = nn.Sequential(
-                nn.Linear(832, 256), nn.ReLU(),
+                nn.Linear(832, 256), nn.ReLU(),  # 768 clip + 64 user
                 nn.Linear(256, 64),  nn.ReLU(),
                 nn.Linear(64, 1),    nn.Sigmoid()
             )
@@ -38,7 +38,7 @@ try:
             x = torch.cat([image_embedding, user_embedding], dim=-1)
             return self.net(x)
 
-    # Global MLP
+    # Global MLP — takes 768-dim CLIP (ViT-L-14)
     global_model = GlobalMLP()
     global_model.eval()
     dummy_input = torch.randn(1, 768)

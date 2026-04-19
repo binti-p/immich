@@ -17,6 +17,7 @@ import { AuthDto } from 'src/dtos/auth.dto';
 import { MapMarkerResponseDto } from 'src/dtos/map.dto';
 import { Permission } from 'src/enum';
 import { AlbumAssetCount, AlbumInfoOptions } from 'src/repositories/album.repository';
+import { AestheticService } from 'src/services/aesthetic.service';
 import { BaseService } from 'src/services/base.service';
 import { addAssets, removeAssets } from 'src/utils/asset.util';
 import { asDateString } from 'src/utils/date';
@@ -195,6 +196,16 @@ export class AlbumService extends BaseService {
 
       for (const recipientId of allUsersExceptUs) {
         await this.eventRepository.emit('AlbumUpdate', { id, recipientId });
+      }
+
+      // Aesthetic: record album_add per successfully added asset (fire-and-forget)
+      const aesthetic = AestheticService.instance;
+      if (aesthetic) {
+        for (const { id: assetId, success } of results) {
+          if (success) {
+            aesthetic.recordInteraction(assetId, auth.user.id, 'album_add', 0.9);
+          }
+        }
       }
     }
 

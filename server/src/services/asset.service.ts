@@ -34,6 +34,7 @@ import {
   QueueName,
 } from 'src/enum';
 import { AestheticIntegrationService } from 'src/modules/aesthetic-integration/aesthetic-integration.service';
+import { AestheticService } from 'src/services/aesthetic.service';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { ActivityRepository } from 'src/repositories/activity.repository';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository';
@@ -155,6 +156,7 @@ export class AssetService extends BaseService {
     viewRepository: ViewRepository,
     websocketRepository: WebsocketRepository,
     workflowRepository: WorkflowRepository,
+    private readonly aestheticService: AestheticService,
     private readonly aestheticIntegrationService: AestheticIntegrationService,
   ) {
     super(
@@ -338,6 +340,21 @@ export class AssetService extends BaseService {
       await this.assetRepository.updateAll(ids, assetDto);
     }
 
+    // Aesthetic interaction hooks — fire-and-forget per asset
+    if (isFavorite === true) {
+      for (const id of ids) {
+        this.aestheticService.recordInteraction(id, auth.user.id, 'favorite', 1.0);
+      }
+    } else if (isFavorite === false) {
+      for (const id of ids) {
+        this.aestheticService.recordInteraction(id, auth.user.id, 'unfavorite', 0.0);
+      }
+    }
+    if (visibility === AssetVisibility.Archive) {
+      for (const id of ids) {
+        this.aestheticService.recordInteraction(id, auth.user.id, 'archive', 0.1);
+      }
+    }
     if (visibility === AssetVisibility.Locked) {
       await this.albumRepository.removeAssetsFromAll(ids);
     }
@@ -544,6 +561,13 @@ export class AssetService extends BaseService {
       assetIds: ids,
       userId: auth.user.id,
     });
+
+    // Aesthetic: record delete/trash signal per asset (fire-and-forget)
+    if (!force) {
+      for (const id of ids) {
+        this.aestheticService.recordInteraction(id, auth.user.id, 'delete', 0.0);
+      }
+    }
   }
 
   async getMetadata(auth: AuthDto, id: string): Promise<AssetMetadataResponseDto[]> {
@@ -794,16 +818,14 @@ export class AssetService extends BaseService {
 
     try {
       const scoresMap = await this.aestheticIntegrationService.getScoresForAssets(assetIds);
-      // Convert AestheticScoreDto map to simple score map
       const scoreValues = new Map<string, number>();
       for (const [assetId, scoreDto] of scoresMap.entries()) {
         scoreValues.set(assetId, scoreDto.score);
       }
       return scoreValues;
     } catch (error) {
-      // Log error but don't fail the request - graceful degradation
       this.logger.error(`Failed to query aesthetic scores: ${error}`, {
-        assetIds: assetIds.slice(0, 10), // Log first 10 IDs to avoid huge logs
+        assetIds: assetIds.slice(0, 10),
         error,
       });
       return new Map();

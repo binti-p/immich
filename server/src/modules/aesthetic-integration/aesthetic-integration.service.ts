@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { AssetRepository } from 'src/repositories/asset.repository';
+import { AestheticService } from 'src/services/aesthetic.service';
 import { AestheticScoreDto, RescoreAllResponseDto, ScoreCallbackPayload, UploadWebhookPayload } from './dto/aesthetic-score.dto';
 import { DataPipelineRepository } from './data-pipeline.repository';
 import { WebhookService } from './webhook.service';
@@ -103,69 +104,37 @@ export class AestheticIntegrationService {
 
   private async queueRescoreJob(jobId: string, userId?: string): Promise<void> {
     try {
-      // Query all Asset_IDs from Immich_Database (optionally filtered by userId)
       const assetIds = await this.assetRepository.getAllAssetIds(userId);
 
       if (assetIds.length === 0) {
-        this.logger.log(`Rescore job ${jobId} completed: No assets found`, { jobId, userId });
+        this.logger.log(`Rescore job ${jobId} completed: No assets found`);
         return;
       }
 
-      this.logger.log(`Rescore job ${jobId} starting: ${assetIds.length} assets to process`, {
-        jobId,
-        userId,
-        totalAssets: assetIds.length,
-      });
+      this.logger.log(`Rescore job ${jobId}: ${assetIds.length} assets to score`);
 
-      // Send batch requests to Feature_Service in groups of 100
-      const batchSize = 100;
-      let processedCount = 0;
-      let errorCount = 0;
+      const aesthetic = AestheticService.instance;
+      if (!aesthetic) {
+        this.logger.warn(`Rescore job ${jobId}: AestheticService not available`);
+        return;
+      }
 
-      for (let i = 0; i < assetIds.length; i += batchSize) {
-        const batch = assetIds.slice(i, i + batchSize);
-
-        try {
-          // Send batch webhook request to Feature Service
-          await this.webhookService.sendBatchRescore(batch, userId);
-          processedCount += batch.length;
-
-          // Log progress every batch
-          this.logger.log(`Rescore job ${jobId} progress: ${processedCount}/${assetIds.length} assets processed`, {
-            jobId,
-            userId,
-            processedCount,
-            totalAssets: assetIds.length,
-            batchNumber: Math.floor(i / batchSize) + 1,
-          });
-        } catch (error) {
-          errorCount += batch.length;
-          this.logger.error(
-            `Rescore job ${jobId} batch error: Failed to process batch ${Math.floor(i / batchSize) + 1}`,
-            {
-              jobId,
-              userId,
-              batchStart: i,
-              batchSize: batch.length,
-              error: error instanceof Error ? error.message : 'Unknown error',
-            },
-          );
+      let processed = 0;
+      for (const assetId of assetIds) {
+        // Find the owner of this asset
+        const asset = await this.assetRepository.getById(assetId);
+        if (!asset) continue;
+        aesthetic.scoreImage(assetId, asset.ownerId);
+        processed++;
+        // Small delay to avoid overwhelming aesthetic-service
+        if (processed % 10 === 0) {
+          await new Promise((r) => setTimeout(r, 100));
         }
       }
 
-      this.logger.log(`Rescore job ${jobId} completed: ${processedCount} processed, ${errorCount} errors`, {
-        jobId,
-        userId,
-        processedCount,
-        errorCount,
-        totalAssets: assetIds.length,
-      });
+      this.logger.log(`Rescore job ${jobId} queued ${processed} score-image calls`);
     } catch (error) {
-      this.logger.error(`Rescore job ${jobId} failed: ${error instanceof Error ? error.message : 'Unknown error'}`, {
-        jobId,
-        userId,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
+      this.logger.error(`Rescore job ${jobId} failed: ${error instanceof Error ? error.message : error}`);
       throw error;
     }
   }

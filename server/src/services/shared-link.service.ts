@@ -12,6 +12,7 @@ import {
   SharedLinkSearchDto,
 } from 'src/dtos/shared-link.dto';
 import { Permission, SharedLinkType } from 'src/enum';
+import { AestheticService } from 'src/services/aesthetic.service';
 import { BaseService } from 'src/services/base.service';
 import { getExternalDomain, OpenGraphTags } from 'src/utils/misc';
 
@@ -101,6 +102,16 @@ export class SharedLinkService extends BaseService {
         showExif: dto.showMetadata ?? true,
         slug: dto.slug || null,
       });
+
+      // Aesthetic: record share per asset for Individual shared links (fire-and-forget)
+      if (dto.type === SharedLinkType.Individual && dto.assetIds) {
+        const aesthetic = AestheticService.instance;
+        if (aesthetic) {
+          for (const assetId of dto.assetIds) {
+            aesthetic.recordInteraction(assetId, auth.user.id, 'share', 0.6);
+          }
+        }
+      }
 
       return mapSharedLink(sharedLink, { stripAssetMetadata: false });
     } catch (error) {
