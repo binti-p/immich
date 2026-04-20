@@ -4,7 +4,7 @@ services:
   # ============================================================================
   # Immich Core Services
   # ============================================================================
-  
+
   immich-server:
     container_name: immich_server
     image: immich-server-dev:latest
@@ -21,21 +21,19 @@ services:
       DB_USERNAME: ${DB_USERNAME:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       DB_DATABASE_NAME: ${DB_DATABASE_NAME:-immich}
-      
+
       # Redis
       REDIS_HOSTNAME: immich_redis
       REDIS_PORT: 6379
-      
-      # Data Pipeline / Aesthetic Service
-      AESTHETIC_SERVICE_URL: ${AESTHETIC_SERVICE_URL:-http://aesthetic-service:8000}
+
       # Feature Service (Scoring Service)
       FEATURE_SERVICE_URL: http://scoring-service:8000
       ENABLE_AESTHETIC_SCORING: ${ENABLE_AESTHETIC_SCORING:-true}
-      
+
       # Logging
       IMMICH_LOG_LEVEL: ${IMMICH_LOG_LEVEL:-log}
       IMMICH_LOG_FORMAT: ${IMMICH_LOG_FORMAT:-json}
-      
+
     ports:
       - '2283:2283'
     depends_on:
@@ -49,29 +47,15 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:2283/api/server-info/ping || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'curl -f http://localhost:2283/api/server-info/ping || exit 1',
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-
-  immich-web:
-    container_name: immich_web
-    image: ghcr.io/immich-app/immich-web:${IMMICH_VERSION:-release}
-    environment:
-      IMMICH_SERVER_URL: http://localhost:2283
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - '3000:3000'
-    depends_on:
-      - immich-server
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   immich-machine-learning:
     container_name: immich_machine_learning
@@ -94,7 +78,7 @@ services:
     image: docker.io/valkey/valkey:9@sha256:3b55fbaa0cd93cf0d9d961f405e4dfcc70efe325e2d84da207a0a8e6d8fde4f9
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping || exit 1"]
+      test: ['CMD-SHELL', 'redis-cli ping || exit 1']
       interval: 10s
       timeout: 5s
       retries: 3
@@ -114,7 +98,11 @@ services:
       - '5432:5432'
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE_NAME:-immich}"]
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE_NAME:-immich}',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -249,7 +237,7 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ['CMD-SHELL', 'curl -f http://localhost:8000/health || exit 1']
       interval: 30s
       timeout: 10s
       retries: 3
@@ -267,7 +255,8 @@ services:
       - '8010:8000'
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/v2/health/ready || exit 1"]
+      test:
+        ['CMD-SHELL', 'curl -f http://localhost:8000/v2/health/ready || exit 1']
       interval: 15s
       timeout: 10s
       retries: 5
