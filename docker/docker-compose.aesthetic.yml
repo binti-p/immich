@@ -26,6 +26,7 @@ services:
       REDIS_HOSTNAME: immich_redis
       REDIS_PORT: 6379
 
+      AESTHETIC_SERVICE_URL: ${AESTHETIC_SERVICE_URL:-http://aesthetic-service:8000}
       # Feature Service (Scoring Service)
       FEATURE_SERVICE_URL: http://scoring-service:8000
       ENABLE_AESTHETIC_SCORING: ${ENABLE_AESTHETIC_SCORING:-true}
