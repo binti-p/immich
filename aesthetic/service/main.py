@@ -84,6 +84,14 @@ async def lifespan(app: FastAPI):
     scorer = Scorer(global_path, pers_path)
     scorer.model_version = version
     active_model_version = version
+    
+    # Insert model version into database
+    await db.upsert_model_version(
+        version_id=version,
+        mlp_object_key=f"models/{version}/personalized_mlp.onnx",
+        embeddings_object_key=f"models/{version}/user_embeddings.parquet",
+    )
+    
     logger.info(
         f"[startup] Scorer ready — model_version={version}, "
         f"personalized={'yes' if pers_path else 'no (cold-start only)'}"

@@ -46,21 +46,6 @@ spec:
             - name: DB_PORT
               value: "5432"
             
-            # Data Pipeline Database Configuration
-            - name: DATA_PIPELINE_DB_HOST
-              value: data-pipeline-postgres
-            - name: DATA_PIPELINE_DB_PORT
-              value: "5432"
-            - name: DATA_PIPELINE_DB_NAME
-              value: aesthetic_hub
-            - name: DATA_PIPELINE_DB_USER
-              value: immich_readonly
-            - name: DATA_PIPELINE_DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: data-pipeline-postgres-secret
-                  key: immich_readonly_password
-            
             # Feature Service Configuration
             - name: FEATURE_SERVICE_URL
               value: http://feature-svc.aesthetic-hub.svc.cluster.local:8001

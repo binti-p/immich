@@ -159,6 +159,34 @@ async def insert_interaction_event(
             )
 
 
+async def upsert_model_version(
+    version_id: str,
+    dataset_version: Optional[str] = None,
+    mlp_object_key: str = "",
+    embeddings_object_key: str = "",
+):
+    """
+    Upsert model version on startup.
+    Called by lifespan to ensure model_versions table has a row for the active model.
+    """
+    async with _pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO model_versions
+                ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
+                 "activatedAt", "createdAt")
+            VALUES ($1, $2, $3, $4, NOW(), NOW())
+            ON CONFLICT ("versionId") DO UPDATE SET
+                "activatedAt" = NOW()
+            """,
+            version_id,
+            dataset_version or version_id,
+            mlp_object_key,
+            embeddings_object_key,
+        )
+    logger.info(f"[db] Upserted model_version: {version_id}")
+
+
 async def insert_inference_log(
     request_id: str,
     asset_id: str,
@@ -174,8 +202,8 @@ async def insert_inference_log(
                 """
                 INSERT INTO model_versions
                     ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
-                     "isColdStart", "activatedAt", "createdAt")
-                VALUES ($1, $1, '', '', false, NOW(), NOW())
+                     "activatedAt", "createdAt")
+                VALUES ($1, $1, '', '', NOW(), NOW())
                 ON CONFLICT ("versionId") DO NOTHING
                 """,
                 model_version,
