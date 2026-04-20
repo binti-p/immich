@@ -106,12 +106,53 @@ def convert_ckpt_to_optimized_onnx(ckpt_path, output_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ckpt-path", required=True)
+    parser.add_argument("--ckpt-path", default=None,
+                        help="Local path to .pth checkpoint (skips MinIO download)")
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--minio-endpoint", default=None,
+                        help="MinIO endpoint URL. If set, downloads latest .pth from MinIO")
+    parser.add_argument("--minio-bucket", default="aesthetic-hub-data")
     args = parser.parse_args()
 
+    ckpt_path = args.ckpt_path
+
+    if ckpt_path is None:
+        # Download latest checkpoint from MinIO
+        import boto3
+        from botocore.client import Config
+
+        endpoint = args.minio_endpoint or os.environ.get("AWS_ENDPOINT_URL", "http://minio:9000")
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin"),
+            config=Config(signature_version="s3v4"),
+            region_name="us-east-1",
+        )
+
+        # List all v* prefixes under models/
+        resp = s3.list_objects_v2(Bucket=args.minio_bucket, Prefix="models/v", Delimiter="/")
+        prefixes = [
+            cp["Prefix"].rstrip("/").split("/")[-1]
+            for cp in resp.get("CommonPrefixes", [])
+        ]
+        versions = sorted([p for p in prefixes if p.startswith("v")], reverse=True)
+
+        if not versions:
+            print("FATAL: No model versions found in MinIO")
+            exit(1)
+
+        latest = versions[0]
+        key = f"models/{latest}/best_personalized_model.pth"
+        ckpt_path = "/tmp/best_personalized_model.pth"
+
+        print(f"Downloading checkpoint from s3://{args.minio_bucket}/{key}")
+        s3.download_file(args.minio_bucket, key, ckpt_path)
+        print(f"Downloaded to {ckpt_path} (version: {latest})")
+
     result = convert_ckpt_to_optimized_onnx(
-        ckpt_path=args.ckpt_path,
+        ckpt_path=ckpt_path,
         output_dir=args.output_dir
     )
     print(f"\nConversion complete: {result['optimized_onnx']}")
