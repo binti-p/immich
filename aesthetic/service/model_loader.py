@@ -1,6 +1,12 @@
 """
 Downloads ONNX models from MinIO at startup.
 Caches to /tmp so the container doesn't re-download on every request.
+
+Supports two bucket layouts:
+  - triton-models bucket (k8s): {stage}/global_mlp/1/model.onnx
+  - aesthetic-hub-data bucket (local dev): models/global/personalized_mlp.onnx
+
+Controlled by MINIO_BUCKET env var (default: triton-models).
 """
 import json
 import logging
@@ -12,8 +18,8 @@ from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
-BUCKET = os.environ.get("MINIO_BUCKET", "aesthetic-hub-data")
-GLOBAL_MODEL_KEY = "models/global/personalized_mlp.onnx"
+BUCKET = os.environ.get("MINIO_BUCKET", "triton-models")
+MODEL_STAGE = os.environ.get("MODEL_STAGE", "production")
 GLOBAL_LOCAL_PATH = "/tmp/global_mlp.onnx"
 PERS_LOCAL_PATH = "/tmp/personalized_mlp.onnx"
 
@@ -27,8 +33,31 @@ def _s3_client():
     )
 
 
+def _resolve_keys() -> Tuple[str, str]:
+    """
+    Resolve the S3 keys for global and personalized models based on bucket layout.
+
+    triton-models bucket (k8s):
+        {stage}/global_mlp/1/model.onnx
+        {stage}/personalized_mlp/1/model.onnx
+
+    aesthetic-hub-data bucket (local dev):
+        models/global/personalized_mlp.onnx  (global model, misleading name)
+        models/{version}/personalized_mlp.onnx
+    """
+    if BUCKET == "triton-models":
+        global_key = f"{MODEL_STAGE}/global_mlp/1/model.onnx"
+        pers_key = f"{MODEL_STAGE}/personalized_mlp/1/model.onnx"
+    else:
+        # Legacy aesthetic-hub-data layout
+        global_key = "models/global/personalized_mlp.onnx"
+        pers_key = None  # resolved dynamically via _latest_model_version
+    return global_key, pers_key
+
+
 def _latest_model_version(s3) -> Optional[str]:
-    """Return the latest v{date} prefix that has a model_card.json, or None."""
+    """Return the latest v{date} prefix that has a model_card.json, or None.
+    Only used for the legacy aesthetic-hub-data bucket layout."""
     try:
         resp = s3.list_objects_v2(Bucket=BUCKET, Prefix="models/v", Delimiter="/")
         prefixes = [
@@ -55,27 +84,40 @@ def download_models() -> Tuple[str, Optional[str], Optional[str]]:
     Always succeeds for global (raises if missing). Personalized is best-effort.
     """
     s3 = _s3_client()
+    global_key, pers_key = _resolve_keys()
 
     # --- Global (cold-start) model — mandatory ---
-    logger.info(f"[model_loader] Downloading global model: {GLOBAL_MODEL_KEY}")
-    s3.download_file(BUCKET, GLOBAL_MODEL_KEY, GLOBAL_LOCAL_PATH)
+    logger.info(f"[model_loader] Downloading global model: s3://{BUCKET}/{global_key}")
+    s3.download_file(BUCKET, global_key, GLOBAL_LOCAL_PATH)
     logger.info(f"[model_loader] Global model saved to {GLOBAL_LOCAL_PATH}")
 
-    # --- Latest versioned personalized model — optional ---
-    version = _latest_model_version(s3)
-    if version is None:
-        logger.info("[model_loader] No versioned model found — cold-start only mode")
-        return GLOBAL_LOCAL_PATH, None, None
+    # --- Personalized model ---
+    if BUCKET == "triton-models":
+        # triton-models layout: both models at known paths
+        try:
+            logger.info(f"[model_loader] Downloading personalized model: s3://{BUCKET}/{pers_key}")
+            s3.download_file(BUCKET, pers_key, PERS_LOCAL_PATH)
+            logger.info(f"[model_loader] Personalized model saved to {PERS_LOCAL_PATH}")
+            return GLOBAL_LOCAL_PATH, PERS_LOCAL_PATH, MODEL_STAGE
+        except Exception as e:
+            logger.warning(f"[model_loader] Could not download personalized model: {e} — cold-start only")
+            return GLOBAL_LOCAL_PATH, None, MODEL_STAGE
+    else:
+        # Legacy aesthetic-hub-data layout: find latest versioned model
+        version = _latest_model_version(s3)
+        if version is None:
+            logger.info("[model_loader] No versioned model found — cold-start only mode")
+            return GLOBAL_LOCAL_PATH, None, None
 
-    pers_key = f"models/{version}/personalized_mlp.onnx"
-    try:
-        logger.info(f"[model_loader] Downloading personalized model: {pers_key}")
-        s3.download_file(BUCKET, pers_key, PERS_LOCAL_PATH)
-        logger.info(f"[model_loader] Personalized model saved to {PERS_LOCAL_PATH}")
-        return GLOBAL_LOCAL_PATH, PERS_LOCAL_PATH, version
-    except Exception as e:
-        logger.warning(f"[model_loader] Could not download personalized model: {e} — cold-start only")
-        return GLOBAL_LOCAL_PATH, None, None
+        legacy_pers_key = f"models/{version}/personalized_mlp.onnx"
+        try:
+            logger.info(f"[model_loader] Downloading personalized model: {legacy_pers_key}")
+            s3.download_file(BUCKET, legacy_pers_key, PERS_LOCAL_PATH)
+            logger.info(f"[model_loader] Personalized model saved to {PERS_LOCAL_PATH}")
+            return GLOBAL_LOCAL_PATH, PERS_LOCAL_PATH, version
+        except Exception as e:
+            logger.warning(f"[model_loader] Could not download personalized model: {e} — cold-start only")
+            return GLOBAL_LOCAL_PATH, None, None
 
 
 def read_model_card(version: str) -> Optional[dict]:
