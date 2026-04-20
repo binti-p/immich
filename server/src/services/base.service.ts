@@ -8,6 +8,7 @@ import { UserAdmin } from 'src/database';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { ActivityRepository } from 'src/repositories/activity.repository';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository';
+import { AestheticService } from 'src/services/aesthetic.service';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { ApiKeyRepository } from 'src/repositories/api-key.repository';
 import { AppRepository } from 'src/repositories/app.repository';
@@ -236,6 +237,9 @@ export class BaseService {
     const user = await this.userRepository.create(payload);
 
     await this.eventRepository.emit('UserCreate', user);
+
+    // Auto-register with aesthetic-service (fire-and-forget)
+    AestheticService.instance?.registerUser(user.id);
 
     return user;
   }

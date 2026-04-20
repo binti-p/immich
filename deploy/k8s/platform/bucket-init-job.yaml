@@ -1,0 +1,28 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bucket-init
+  namespace: aesthetic-hub
+spec:
+  template:
+    spec:
+      containers:
+        - name: mc
+          image: minio/mc
+          command: ["sh", "-c"]
+          args:
+            - |
+              mc alias set myminio http://minio.platform.svc.cluster.local:9000 $AWS_ACCESS_KEY_ID $AWS_SECRET_ACCESS_KEY
+              mc mb --ignore-existing myminio/aesthetic-hub-data
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: accesskey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secretkey
+      restartPolicy: OnFailure

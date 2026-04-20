@@ -2,7 +2,7 @@ import { Column, ForeignKeyColumn, PrimaryColumn, Table, Timestamp, UpdateDateCo
 import { Generated } from 'kysely';
 import { UserTable } from 'src/schema/tables/user.table';
 
-@Table('user_interaction_counts')
+@Table({ name: 'user_interaction_counts', synchronize: false })
 export class UserInteractionCountsTable {
   @PrimaryColumn()
   @ForeignKeyColumn(() => UserTable, { onDelete: 'CASCADE' })

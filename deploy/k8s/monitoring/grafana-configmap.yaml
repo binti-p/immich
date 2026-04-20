@@ -178,3 +178,164 @@ data:
         }
       ]
     }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-aesthetic
+  namespace: monitoring
+data:
+  aesthetic-scoring.json: |
+    {
+      "title": "Aesthetic Hub - Scoring Pipeline",
+      "uid": "aes-scoring",
+      "tags": ["aesthetic-hub", "ml"],
+      "timezone": "browser",
+      "schemaVersion": 38,
+      "refresh": "30s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Score Distribution (cumulative)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "targets": [
+            {
+              "expr": "rate(aesthetic_score_bucket[5m])",
+              "legendFormat": "le={{le}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "id": 2,
+          "title": "Median Score Over Time",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.5, rate(aesthetic_score_bucket[5m]))",
+              "legendFormat": "p50"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1}}
+        },
+        {
+          "id": 3,
+          "title": "Cold Start Rate",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+          "targets": [
+            {
+              "expr": "rate(cold_start_total[5m]) / rate(score_image_request_duration_seconds_count[5m])",
+              "legendFormat": "cold start rate"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.5},
+                  {"color": "red", "value": 0.8}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 4,
+          "title": "Low Confidence Rate",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 8},
+          "targets": [
+            {
+              "expr": "rate(low_confidence_total[5m]) / rate(score_image_request_duration_seconds_count[5m])",
+              "legendFormat": "low confidence rate"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "yellow", "value": 0.2},
+                  {"color": "red", "value": 0.4}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "title": "Active Model Version",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 8},
+          "targets": [
+            {
+              "expr": "aesthetic_active_model_version_timestamp",
+              "legendFormat": "model version"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "dateTimeAsIso"}}
+        },
+        {
+          "id": 6,
+          "title": "MinIO Flush Errors",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 8},
+          "targets": [
+            {
+              "expr": "rate(minio_flush_errors_total[5m])",
+              "legendFormat": "flush errors/s"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {"color": "green", "value": null},
+                  {"color": "red", "value": 0.01}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 7,
+          "title": "Event Ingestion by Type",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+          "targets": [
+            {
+              "expr": "rate(interaction_events_total[5m])",
+              "legendFormat": "{{event_type}}"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "short"}}
+        },
+        {
+          "id": 8,
+          "title": "Score-Image Latency p50/p95",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.5, rate(score_image_request_duration_seconds_bucket[5m]))",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, rate(score_image_request_duration_seconds_bucket[5m]))",
+              "legendFormat": "p95"
+            }
+          ],
+          "fieldConfig": {"defaults": {"unit": "s"}}
+        }
+      ]
+    }

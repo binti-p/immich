@@ -254,3 +254,52 @@ data:
             annotations:
               summary: "Prometheus memory usage is high"
               description: "Prometheus is using {{ printf \"%.2f\" $value }}GB"
+
+      - name: aesthetic
+        interval: 30s
+        rules:
+          - alert: AestheticMinIOFlushFailing
+            expr: increase(minio_flush_errors_total[15m]) > 3
+            for: 5m
+            labels:
+              severity: warning
+              category: aesthetic
+            annotations:
+              summary: "Aesthetic MinIO flush is failing"
+              description: "{{ $value }} flush errors in last 15 minutes — interaction events may be lost"
+
+          - alert: AestheticHighColdStartRate
+            expr: |
+              (rate(cold_start_total[30m]) / rate(score_image_request_duration_seconds_count[30m])) > 0.8
+            for: 30m
+            labels:
+              severity: warning
+              category: aesthetic
+            annotations:
+              summary: "Aesthetic cold start rate is high"
+              description: "{{ printf \"%.0f\" $value }}% of score-image requests are cold start — user embeddings may not be loading or model not promoted"
+
+          - alert: AestheticHighLowConfidenceRate
+            expr: |
+              (rate(low_confidence_total[30m]) / rate(score_image_request_duration_seconds_count[30m])) > 0.4
+            for: 30m
+            labels:
+              severity: warning
+              category: aesthetic
+            annotations:
+              summary: "Aesthetic low confidence rate is high"
+              description: "{{ printf \"%.0f\" $value }}% of scores are low confidence — model may need retraining"
+
+          - alert: AestheticScoreDistributionShift
+            expr: |
+              abs(
+                histogram_quantile(0.5, rate(aesthetic_score_bucket[30m])) -
+                histogram_quantile(0.5, rate(aesthetic_score_bucket[30m] offset 1h))
+              ) > 0.2
+            for: 10m
+            labels:
+              severity: warning
+              category: aesthetic
+            annotations:
+              summary: "Aesthetic score distribution shifted significantly"
+              description: "Median score shifted by {{ printf \"%.2f\" $value }} in last 30 min vs 1h ago — may indicate model promotion or data issue"

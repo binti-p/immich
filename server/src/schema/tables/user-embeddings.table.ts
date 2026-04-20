@@ -3,7 +3,7 @@ import { Generated } from 'kysely';
 import { ModelVersionsTable } from 'src/schema/tables/model-versions.table';
 import { UserTable } from 'src/schema/tables/user.table';
 
-@Table('user_embeddings')
+@Table({ name: 'user_embeddings', synchronize: false })
 export class UserEmbeddingsTable {
   @PrimaryColumn()
   @ForeignKeyColumn(() => UserTable, { onDelete: 'CASCADE' })

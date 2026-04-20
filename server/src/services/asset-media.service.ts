@@ -29,7 +29,7 @@ import {
   StorageFolder,
 } from 'src/enum';
 import { AuthRequest } from 'src/middleware/auth.guard';
-import { AestheticIntegrationService } from 'src/modules/aesthetic-integration/aesthetic-integration.service';
+import { AestheticService } from 'src/services/aesthetic.service';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { ActivityRepository } from 'src/repositories/activity.repository';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository';
@@ -148,7 +148,7 @@ export class AssetMediaService extends BaseService {
     viewRepository: ViewRepository,
     websocketRepository: WebsocketRepository,
     workflowRepository: WorkflowRepository,
-    private readonly aestheticIntegrationService: AestheticIntegrationService,
+    private readonly aestheticService: AestheticService,
   ) {
     super(
       logger,
@@ -315,13 +315,8 @@ export class AssetMediaService extends BaseService {
 
       await this.userRepository.updateUsage(auth.user.id, file.size);
 
-      // Trigger aesthetic scoring pipeline (async, non-blocking)
-      // Requirements: 3.1, 3.2, 3.3, 3.5
-      await this.aestheticIntegrationService.notifyFeatureService(
-        asset.id,
-        asset.ownerId,
-        asset.originalPath,
-      );
+      // Trigger aesthetic scoring pipeline (fire-and-forget, never blocks upload)
+      this.aestheticService.scoreImage(asset.id, auth.user.id);
 
       return { id: asset.id, status: AssetMediaStatus.CREATED };
     } catch (error: any) {
@@ -331,6 +326,9 @@ export class AssetMediaService extends BaseService {
 
   async downloadOriginal(auth: AuthDto, id: string, dto: AssetDownloadOriginalDto): Promise<ImmichFileResponse> {
     await this.requireAccess({ auth, permission: Permission.AssetDownload, ids: [id] });
+
+    // Aesthetic: record download signal (fire-and-forget)
+    this.aestheticService.recordInteraction(id, auth.user.id, 'download', 0.7);
 
     if (auth.sharedLink) {
       dto.edited = true;

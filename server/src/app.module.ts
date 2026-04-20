@@ -22,8 +22,7 @@ import { GlobalExceptionFilter } from 'src/middleware/global-exception.filter';
 import { LoggingInterceptor } from 'src/middleware/logging.interceptor';
 import { AestheticIntegrationController } from 'src/modules/aesthetic-integration/aesthetic-integration.controller';
 import { AestheticIntegrationService } from 'src/modules/aesthetic-integration/aesthetic-integration.service';
-import { DataPipelineRepository } from 'src/modules/aesthetic-integration/data-pipeline.repository';
-import { WebhookService } from 'src/modules/aesthetic-integration/webhook.service';
+import { AestheticService } from 'src/services/aesthetic.service';
 import { repositories } from 'src/repositories';
 import { AppRepository } from 'src/repositories/app.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
@@ -45,7 +44,7 @@ import { getKyselyConfig } from 'src/utils/database';
 import { configureUserAgent } from 'src/utils/fetch';
 
 // Aesthetic integration components
-const aestheticProviders = [AestheticIntegrationService, DataPipelineRepository, WebhookService];
+const aestheticProviders = [AestheticIntegrationService, AestheticService];
 
 const common = [...repositories, ...services, ...aestheticProviders, GlobalExceptionFilter];
 

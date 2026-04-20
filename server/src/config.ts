@@ -254,7 +254,7 @@ export const defaults = Object.freeze<SystemConfig>({
     },
     clip: {
       enabled: true,
-      modelName: 'ViT-B-32__openai',
+      modelName: 'ViT-L-14__openai',
     },
     duplicateDetection: {
       enabled: true,

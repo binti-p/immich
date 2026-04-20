@@ -92,7 +92,7 @@ services:
       POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
       POSTGRES_INITDB_ARGS: '--data-checksums'
     volumes:
-      - ${DB_DATA_LOCATION:-../postgres-data}:/var/lib/postgresql/data
+      - ${DB_DATA_LOCATION:-../docker/postgres-data}:/var/lib/postgresql/data
     shm_size: 128mb
     ports:
       - '5432:5432'
@@ -108,6 +108,59 @@ services:
       retries: 5
 
   # ============================================================================
+  # MinIO Object Store
+  # ============================================================================
+
+  minio:
+    container_name: immich_minio
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bucket-init:
+    container_name: immich_bucket_init
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ../triton-models:/triton-models:ro
+      - ../aesthetic/pipelines/batch:/scripts:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}
+        mc mb --ignore-existing myminio/aesthetic-hub-data
+
+        # Seed cold-start global model (permanent)
+        mc cp /triton-models/global_mlp/1/model.onnx myminio/aesthetic-hub-data/models/global/personalized_mlp.onnx
+
+        # Seed versioned stub model (v0000-00-00 = bootstrap version)
+        mc cp /triton-models/personalized_mlp/1/model.onnx myminio/aesthetic-hub-data/models/v0000-00-00/personalized_mlp.onnx
+
+        # Seed empty user_embeddings.parquet
+        mc cp /scripts/empty_embeddings.parquet myminio/aesthetic-hub-data/models/v0000-00-00/user_embeddings.parquet
+
+        # Seed model_card.json for bootstrap version
+        printf '{"version_id":"v0000-00-00","dataset_version":"bootstrap","mlp_object_key":"models/v0000-00-00/personalized_mlp.onnx","embeddings_object_key":"models/v0000-00-00/user_embeddings.parquet","quality_gates":{"passed":true},"training_details":{"note":"bootstrap stub model"},"architecture":{"clip_dim":768,"user_embedding_dim":64,"input_dim":832}}' | mc pipe myminio/aesthetic-hub-data/models/v0000-00-00/model_card.json
+
+        echo "Bucket aesthetic-hub-data ready. Models seeded."
+    restart: "no"
+
+  # ============================================================================
   # Aesthetic Scoring Services
   # ============================================================================
 
@@ -119,6 +172,41 @@ services:
       - '8080:8080'
     depends_on:
       - immich_postgres
+
+  aesthetic-service:
+    container_name: aesthetic_service
+    build:
+      context: ../aesthetic
+      dockerfile: service/Dockerfile
+    environment:
+      POSTGRES_HOST: immich_postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: aesthetic-hub-data
+      IMMICH_SERVER_URL: http://immich_server:2283
+      INTERACTION_FLUSH_SIZE: 100
+      INFERENCE_FLUSH_SIZE: 50
+    ports:
+      - '8002:8000'
+    depends_on:
+      immich_postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      bucket-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   scoring-service:
     container_name: scoring_service
@@ -212,5 +300,6 @@ services:
 
 volumes:
   model-cache:
+  minio-data:
   prometheus-data:
   grafana-data:

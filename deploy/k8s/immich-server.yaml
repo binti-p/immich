@@ -29,6 +29,8 @@ spec:
         - name: immich-server
           image: ghcr.io/immich-app/immich-server:release
           env:
+            - name: AESTHETIC_SERVICE_URL
+              value: "http://aesthetic-service:8002"
             - name: DB_HOSTNAME
               value: immich-postgres
             - name: DB_USERNAME
