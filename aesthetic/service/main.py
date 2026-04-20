@@ -2,7 +2,7 @@
 aesthetic-service — orchestrates the full scoring pipeline.
 
 Flow for POST /score-image:
-  1. Read CLIP from smart_search
+  1. Read CLIP from smart_search (single attempt - called after CLIP job completes)
   2. Read user_embeddings + interaction_count
   3. Compute alpha = n/(n+10), is_cold_start
   4. Run ONNX scorer (global + personalized blend)
@@ -12,7 +12,6 @@ Flow for POST /score-image:
   8. Buffer to MinIO inference-log parquet
   9. Return score to NestJS
 """
-import asyncio
 import logging
 import os
 import uuid
@@ -49,6 +48,9 @@ SCORE_IMAGE_DURATION = Histogram(
 )
 COLD_START_TOTAL = Counter("cold_start_total", "Cold-start scoring events")
 LOW_CONFIDENCE_TOTAL = Counter("low_confidence_total", "Low-confidence scoring events")  # E3.2
+SCORE_IMAGE_ERRORS = Counter(
+    "score_image_errors_total", "Failed scoring attempts", ["error_type"]
+)
 
 # E3.1 — Score distribution histogram
 AESTHETIC_SCORE_HISTOGRAM = Histogram(
@@ -217,21 +219,52 @@ async def score_image(req: ScoreImageRequest):
     import time
     start = time.time()
 
-    # 1. Read CLIP embedding — retry up to 3 times with backoff (ML indexing is async)
-    clip_list = None
-    for attempt in range(3):
-        clip_list = await db.get_clip_embedding(req.asset_id)
-        if clip_list is not None:
-            break
-        if attempt < 2:
-            await asyncio.sleep(5 * (attempt + 1))  # 5s, 10s
+    request_id = str(uuid.uuid4())
 
+    # 1. Read CLIP embedding — single attempt only (called after CLIP job completes)
+    clip_list = await db.get_clip_embedding(req.asset_id)
     if clip_list is None:
+        error_msg = f"No CLIP embedding found for asset"
+        logger.error(f"[score_image] {error_msg}: {req.asset_id}")
+        
+        # Track error metric
+        SCORE_IMAGE_ERRORS.labels(error_type="clip_missing").inc()
+        
+        # Log failed attempt to inference_log
+        await db.insert_inference_log(
+            request_id=request_id,
+            asset_id=req.asset_id,
+            user_id=req.user_id,
+            model_version=active_model_version,
+            is_cold_start=True,  # Unknown, assume cold start
+            alpha=0.0,  # Unknown
+            status="failed_clip_missing",
+            error_message=error_msg,
+        )
+        
         raise HTTPException(status_code=404, detail="No CLIP embedding found for asset")
 
     clip_emb = np.array(clip_list, dtype=np.float32)
     if len(clip_emb) != 768:
-        raise HTTPException(status_code=422, detail=f"Expected 768-dim CLIP, got {len(clip_emb)}")
+        error_msg = f"Expected 768-dim CLIP, got {len(clip_emb)}"
+        logger.error(f"[score_image] {error_msg} for {req.asset_id}")
+        
+        # Track error metric
+        SCORE_IMAGE_ERRORS.labels(error_type="invalid_clip_dim").inc()
+        
+        # Log failed attempt
+        await db.insert_inference_log(
+            request_id=request_id,
+            asset_id=req.asset_id,
+            user_id=req.user_id,
+            model_version=active_model_version,
+            is_cold_start=True,
+            alpha=0.0,
+            status="failed_error",
+            error_message=error_msg,
+        )
+        
+        raise HTTPException(status_code=422, detail=error_msg)
 
     # 2. Read user embedding + interaction count
     user_list = await db.get_user_embedding(req.user_id)
@@ -245,18 +278,37 @@ async def score_image(req: ScoreImageRequest):
     alpha = n / (n + 10) if n > 0 else 0.0
 
     # 4. Run ONNX scorer
-    final_score, g_score, p_score, effective_alpha, low_confidence = scorer.score(
-        clip_emb, user_emb, alpha, is_cold_start
-    )
+    try:
+        final_score, g_score, p_score, effective_alpha, low_confidence = scorer.score(
+            clip_emb, user_emb, alpha, is_cold_start
+        )
+    except Exception as e:
+        error_msg = f"Scorer failed: {str(e)}"
+        logger.error(f"[score_image] {error_msg} for {req.asset_id}")
+        
+        # Track error metric
+        SCORE_IMAGE_ERRORS.labels(error_type="scorer_error").inc()
+        
+        # Log failed attempt
+        await db.insert_inference_log(
+            request_id=request_id,
+            asset_id=req.asset_id,
+            user_id=req.user_id,
+            model_version=active_model_version,
+            is_cold_start=is_cold_start,
+            alpha=alpha,
+            status="failed_error",
+            error_message=error_msg,
+        )
+        
+        raise HTTPException(status_code=500, detail=error_msg)
 
     if is_cold_start:
         COLD_START_TOTAL.inc()
     if low_confidence:
         LOW_CONFIDENCE_TOTAL.inc()  # E3.2
 
-    request_id = str(uuid.uuid4())
-
-    # 5. Write inference_log
+    # 5. Write inference_log (success)
     await db.insert_inference_log(
         request_id=request_id,
         asset_id=req.asset_id,
@@ -264,6 +316,8 @@ async def score_image(req: ScoreImageRequest):
         model_version=active_model_version,
         is_cold_start=is_cold_start,
         alpha=effective_alpha,
+        status="success",
+        error_message=None,
     )
 
     # 6. Upsert aesthetic_scores

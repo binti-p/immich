@@ -193,6 +193,8 @@ async def insert_inference_log(
     model_version: Optional[str],
     is_cold_start: bool,
     alpha: float,
+    status: str = "success",
+    error_message: Optional[str] = None,
 ):
     async with _pool.acquire() as conn:
         # Ensure model_version exists in model_versions table (FK constraint)
@@ -211,10 +213,10 @@ async def insert_inference_log(
             """
             INSERT INTO inference_log
                 ("requestId", "assetId", "userId", "modelVersion",
-                 "isColdStart", alpha, "requestReceivedAt", "computedAt")
-            VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, NOW(), NOW())
+                 "isColdStart", alpha, "requestReceivedAt", "computedAt", status, "errorMessage")
+            VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, NOW(), NOW(), $7, $8)
             """,
-            request_id, asset_id, user_id, model_version, is_cold_start, alpha,
+            request_id, asset_id, user_id, model_version, is_cold_start, alpha, status, error_message,
         )
 
 

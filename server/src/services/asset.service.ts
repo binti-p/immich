@@ -377,7 +377,7 @@ export class AssetService extends BaseService {
         }
       } else if (visibility === AssetVisibility.Timeline) {
         // Check which assets were previously archived (unarchive action)
-        const assets = await this.assetRepository.getByIds(ids, { exifInfo: false });
+        const assets = await this.assetRepository.getByIds(ids);
         for (const asset of assets) {
           if (asset.visibility === AssetVisibility.Archive) {
             this.aestheticService.recordInteraction(asset.id, auth.user.id, 'unarchive', 0.5);
@@ -906,7 +906,6 @@ export class AssetService extends BaseService {
     // Sort by aesthetic score using utility function
     return sortByAestheticScore(assetsWithScores);
   }
-}
 
   recordCopyLink(auth: AuthDto, id: string): void {
     this.aestheticService.recordInteraction(id, auth.user.id, 'copy_link', 0.7);
@@ -915,3 +914,4 @@ export class AssetService extends BaseService {
   recordSearchClick(auth: AuthDto, id: string): void {
     this.aestheticService.recordInteraction(id, auth.user.id, 'search_click', 1.0);
   }
+}
