@@ -1,7 +1,7 @@
 import { Column, CreateDateColumn, PrimaryColumn, Table, Timestamp } from '@immich/sql-tools';
 import { Generated } from 'kysely';
 
-@Table('model_versions')
+@Table({ name: 'model_versions', synchronize: false })
 export class ModelVersionsTable {
   @PrimaryColumn()
   versionId!: string;

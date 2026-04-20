@@ -1,12 +1,10 @@
-import { Check, Column, CreateDateColumn, ForeignKeyColumn, Index, PrimaryColumn, Table, Timestamp } from '@immich/sql-tools';
+import { Check, Column, CreateDateColumn, ForeignKeyColumn, PrimaryColumn, Table, Timestamp } from '@immich/sql-tools';
 import { Generated } from 'kysely';
 import { AssetTable } from 'src/schema/tables/asset.table';
 import { UserTable } from 'src/schema/tables/user.table';
 
-@Table('interaction_events')
-@Check({ expression: `"source" = 'immich_upload'`, name: 'CHK_interaction_events_source' })
-@Index({ columns: ['userId', 'eventTime'], where: '"deletedAt" IS NULL', name: 'idx_ie_user_time' })
-@Index({ columns: ['assetId'], where: '"deletedAt" IS NULL', name: 'idx_ie_asset' })
+@Table({ name: 'interaction_events', synchronize: false })
+@Check({ expression: `"source" = 'immich_upload'`, name: 'interaction_events_source_check' })
 export class InteractionEventsTable {
   @PrimaryColumn()
   eventId!: string;

@@ -3,7 +3,7 @@ import { AssetTable } from 'src/schema/tables/asset.table';
 import { ModelVersionsTable } from 'src/schema/tables/model-versions.table';
 import { UserTable } from 'src/schema/tables/user.table';
 
-@Table('inference_log')
+@Table({ name: 'inference_log', synchronize: false })
 export class InferenceLogTable {
   @PrimaryColumn()
   requestId!: string;
