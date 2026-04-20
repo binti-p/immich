@@ -38,10 +38,11 @@ MINIO_KEY      = os.environ.get("AWS_ACCESS_KEY_ID", "minioadmin")
 MINIO_SECRET   = os.environ.get("AWS_SECRET_ACCESS_KEY", "minioadmin")
 BUCKET         = os.environ.get("MINIO_BUCKET", "aesthetic-hub-data")
 
-EVENT_WINDOW_DAYS  = int(os.environ.get("EVENT_WINDOW_DAYS", "7"))
+EVENT_WINDOW_DAYS  = int(os.environ.get("EVENT_WINDOW_DAYS", "30"))
 BURST_WINDOW_SECS  = int(os.environ.get("BURST_WINDOW_SECS", "60"))
 MIN_EVENTS         = int(os.environ.get("MIN_EVENTS", "50"))
-MIN_USERS          = int(os.environ.get("MIN_USERS", "5"))
+MIN_USERS          = int(os.environ.get("MIN_USERS", "1"))
+MIN_USER_EVENTS    = int(os.environ.get("MIN_USER_EVENTS", "3"))
 TRIGGER_TRAINING   = os.environ.get("TRIGGER_TRAINING", "false").lower() == "true"
 ARGO_WEBHOOK       = os.environ.get("ARGO_WEBHOOK_URL", "http://129.114.27.253:31234/aesthetic-hub/train")
 
@@ -414,10 +415,28 @@ PARQUET_SCHEMA = pa.schema([
     pa.field("clip_embedding", pa.list_(pa.float32(), CLIP_DIM)),
     pa.field("label",          pa.float32()),
     pa.field("event_type",     pa.string()),
+    pa.field("split",          pa.string()),
 ])
 
 
-def to_table(rows: list[dict], clip: dict[str, list[float]]) -> pa.Table:
+def filter_sparse_users(events: list[dict]) -> tuple[list[dict], dict]:
+    counts: dict[str, int] = defaultdict(int)
+    for event in events:
+        counts[event["user_id"]] += 1
+
+    excluded_users = {user_id for user_id, count in counts.items() if count < MIN_USER_EVENTS}
+    filtered_events = [event for event in events if event["user_id"] not in excluded_users]
+    excluded_rows = len(events) - len(filtered_events)
+
+    return filtered_events, {
+        "min_user_events": MIN_USER_EVENTS,
+        "excluded_sparse_users": len(excluded_users),
+        "excluded_sparse_rows": excluded_rows,
+        "excluded_user_ids": sorted(excluded_users),
+    }
+
+
+def to_table(rows: list[dict], clip: dict[str, list[float]], split: str) -> pa.Table:
     return pa.table(
         {
             "user_id":        [r["user_id"] for r in rows],
@@ -425,6 +444,7 @@ def to_table(rows: list[dict], clip: dict[str, list[float]]) -> pa.Table:
             "clip_embedding": [[float(x) for x in clip[r["asset_id"]]] for r in rows],
             "label":          [float(r["label"]) for r in rows],
             "event_type":     [r["event_type"] for r in rows],
+            "split":          [split for _ in rows],
         },
         schema=PARQUET_SCHEMA,
     )
@@ -433,15 +453,42 @@ def to_table(rows: list[dict], clip: dict[str, list[float]]) -> pa.Table:
 def upload_parquet(client, table: pa.Table, key: str):
     buf = io.BytesIO()
     pq.write_table(table, buf)
+    size_bytes = buf.tell()
     buf.seek(0)
     client.upload_fileobj(buf, BUCKET, key)
-    log.info(f"[minio] Uploaded s3://{BUCKET}/{key} ({buf.tell()} bytes)")
+    log.info(f"[minio] Uploaded s3://{BUCKET}/{key} ({size_bytes} bytes)")
 
 
 def upload_json(client, data: dict, key: str):
     client.put_object(Bucket=BUCKET, Key=key,
                       Body=json.dumps(data, indent=2).encode(), ContentType="application/json")
     log.info(f"[minio] Uploaded s3://{BUCKET}/{key}")
+
+
+def upload_manifest(client, tables: list[pa.Table], prefix: str):
+    non_empty_tables = [table for table in tables if table.num_rows > 0]
+    if not non_empty_tables:
+        raise RuntimeError("No rows available to build a retraining manifest")
+    manifest_table = non_empty_tables[0] if len(non_empty_tables) == 1 else pa.concat_tables(non_empty_tables)
+
+    manifest_parquet_key = f"{prefix}/retraining_manifest.parquet"
+    upload_parquet(client, manifest_table, manifest_parquet_key)
+
+    manifest_df = manifest_table.to_pandas()
+    manifest_df["clip_embedding"] = manifest_df["clip_embedding"].apply(
+        lambda value: json.dumps([float(item) for item in value])
+    )
+    buf = io.StringIO()
+    manifest_df.to_csv(buf, index=False)
+    client.put_object(
+        Bucket=BUCKET,
+        Key=f"{prefix}/retraining_manifest.csv",
+        Body=buf.getvalue().encode(),
+        ContentType="text/csv",
+    )
+    log.info(f"[minio] Uploaded s3://{BUCKET}/{prefix}/retraining_manifest.csv")
+
+    return manifest_table
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -466,6 +513,8 @@ def main():
     # Burst grouping
     events = burst_group(events)
 
+    events, sparse_stats = filter_sparse_users(events)
+
     # ── E1.2: Volume gate ─────────────────────────────────────────────────────
     all_user_ids = list({e["user_id"] for e in events})
     test_users = e2_get_or_create_test_users(all_user_ids, client)
@@ -484,6 +533,7 @@ def main():
             "skipped": True, "skip_reason": skip_reason,
             "event_window_days": EVENT_WINDOW_DAYS,
             "quality": {"ingestion": {**schema_stats, **clip_stats, **signal_stats}},
+            "sparse_user_filter": sparse_stats,
         }
         upload_json(client, dataset_card, f"{prefix}/dataset_card.json")
         conn.close()
@@ -500,8 +550,12 @@ def main():
     conn.close()
 
     # ── Write parquets ────────────────────────────────────────────────────────
-    upload_parquet(client, to_table(train, clip), f"{prefix}/train.parquet")
-    upload_parquet(client, to_table(val, clip),   f"{prefix}/val.parquet")
+    train_table = to_table(train, clip, "train")
+    val_table = to_table(val, clip, "val")
+    test_table = to_table(test_events, clip, "test")
+
+    upload_parquet(client, train_table, f"{prefix}/train.parquet")
+    upload_parquet(client, val_table, f"{prefix}/val.parquet")
 
     # Write test.parquet permanently (only if it doesn't exist yet)
     try:
@@ -509,8 +563,14 @@ def main():
         log.info(f"[E2.1] test.parquet already exists, skipping write")
     except Exception:
         if test_events:
-            upload_parquet(client, to_table(test_events, clip), TEST_PARQUET_KEY)
+            upload_parquet(client, test_table, TEST_PARQUET_KEY)
             log.info(f"[E2.1] Wrote permanent test.parquet ({len(test_events)} rows)")
+
+    manifest_table = upload_manifest(
+        client,
+        [train_table, val_table, test_table],
+        prefix,
+    )
 
     # ── dataset_card.json ─────────────────────────────────────────────────────
     label_dist: dict[str, int] = defaultdict(int)
@@ -546,6 +606,8 @@ def main():
                 "score_interaction_warning":      corr_stats["score_interaction_warning"],
                 "interaction_rate":               rate_stats["interaction_rate"],
                 "interaction_rate_decline_warning": rate_stats["interaction_rate_decline_warning"],
+                "excluded_sparse_users":          sparse_stats["excluded_sparse_users"],
+                "excluded_sparse_rows":           sparse_stats["excluded_sparse_rows"],
             },
         },
         "splits": {
@@ -555,9 +617,18 @@ def main():
         },
         "event_label_distribution": dict(label_dist),
         "schema": {
-            "columns": ["user_id", "asset_id", "clip_embedding", "label", "event_type"],
+            "columns": ["user_id", "asset_id", "clip_embedding", "label", "event_type", "split"],
             "clip_dim": CLIP_DIM,
         },
+        "artifacts": {
+            "train_parquet_key": f"{prefix}/train.parquet",
+            "val_parquet_key": f"{prefix}/val.parquet",
+            "persistent_test_parquet_key": TEST_PARQUET_KEY,
+            "manifest_parquet_key": f"{prefix}/retraining_manifest.parquet",
+            "manifest_csv_key": f"{prefix}/retraining_manifest.csv",
+        },
+        "sparse_user_filter": sparse_stats,
+        "manifest_rows": manifest_table.num_rows,
     }
 
     upload_json(client, dataset_card, f"{prefix}/dataset_card.json")

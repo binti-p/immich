@@ -1,0 +1,18 @@
+seed: 42
+model:
+  input_dim: 768
+  user_emb_dim: 64
+training:
+  batch_size: 512
+  epochs: 5
+  lr: 0.001
+  weight_decay: 0.0
+  device: cpu
+mlflow:
+  experiment_name: flickr-personalized
+  run_name: personalized-light
+quality_gates:
+  min_eval_samples: 5
+  min_val_srcc_gain: 0.005
+  max_val_mae_regression: 0.01
+  max_val_mse_regression: 0.005

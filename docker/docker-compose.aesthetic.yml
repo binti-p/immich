@@ -48,11 +48,7 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'curl -f http://localhost:2283/api/server-info/ping || exit 1',
-        ]
+      test: [ 'CMD-SHELL', 'curl -f http://localhost:2283/api/server-info/ping || exit 1' ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -79,7 +75,7 @@ services:
     image: docker.io/valkey/valkey:9@sha256:3b55fbaa0cd93cf0d9d961f405e4dfcc70efe325e2d84da207a0a8e6d8fde4f9
     restart: unless-stopped
     healthcheck:
-      test: ['CMD-SHELL', 'redis-cli ping || exit 1']
+      test: [ 'CMD-SHELL', 'redis-cli ping || exit 1' ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -99,11 +95,7 @@ services:
       - '5432:5432'
     restart: unless-stopped
     healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE_NAME:-immich}',
-        ]
+      test: [ 'CMD-SHELL', 'pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE_NAME:-immich}' ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -126,7 +118,7 @@ services:
       - minio-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      test: [ "CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -140,7 +132,7 @@ services:
     volumes:
       - ../triton-models:/triton-models:ro
       - ../aesthetic/pipelines/batch:/scripts:ro
-    entrypoint: ["sh", "-c"]
+    entrypoint: [ "sh", "-c" ]
     command:
       - |
         mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -152,14 +144,69 @@ services:
         # Seed versioned stub model (v0000-00-00 = bootstrap version)
         mc cp /triton-models/personalized_mlp/1/model.onnx myminio/aesthetic-hub-data/models/v0000-00-00/personalized_mlp.onnx
 
+        # Seed bootstrap checkpoint for first retraining warm-start if provided
+        if [ -f /scripts/bootstrap_personalized_model.pth ]; then
+          mc cp /scripts/bootstrap_personalized_model.pth myminio/aesthetic-hub-data/models/v0000-00-00/best_personalized_model.pth
+        else
+          echo "bootstrap_personalized_model.pth not found; skipping checkpoint seed"
+        fi
+
         # Seed empty user_embeddings.parquet
         mc cp /scripts/empty_embeddings.parquet myminio/aesthetic-hub-data/models/v0000-00-00/user_embeddings.parquet
 
         # Seed model_card.json for bootstrap version
-        printf '{"version_id":"v0000-00-00","dataset_version":"bootstrap","mlp_object_key":"models/v0000-00-00/personalized_mlp.onnx","embeddings_object_key":"models/v0000-00-00/user_embeddings.parquet","quality_gates":{"passed":true},"training_details":{"note":"bootstrap stub model"},"architecture":{"clip_dim":768,"user_embedding_dim":64,"input_dim":832}}' | mc pipe myminio/aesthetic-hub-data/models/v0000-00-00/model_card.json
+        printf '{"version_id":"v0000-00-00","dataset_version":"bootstrap","mlp_object_key":"models/v0000-00-00/personalized_mlp.onnx","checkpoint_object_key":"models/v0000-00-00/best_personalized_model.pth","embeddings_object_key":"models/v0000-00-00/user_embeddings.parquet","quality_gates":{"passed":true},"training_details":{"note":"bootstrap stub model"},"architecture":{"clip_dim":768,"user_embedding_dim":64,"input_dim":832}}' | mc pipe myminio/aesthetic-hub-data/models/v0000-00-00/model_card.json
+
+        # Create MLflow artifacts bucket
+        mc mb --ignore-existing myminio/mlflow-artifacts
 
         echo "Bucket aesthetic-hub-data ready. Models seeded."
     restart: "no"
+
+  # ============================================================================
+  # MLflow Tracking
+  # ============================================================================
+
+  mlflow-postgres:
+    container_name: mlflow_postgres
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${MLFLOW_DB_USER:-mlflow}
+      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD:-mlflow}
+      POSTGRES_DB: ${MLFLOW_DB_NAME:-mlflowdb}
+    volumes:
+      - mlflow-postgres-data:/var/lib/postgresql/data
+    ports:
+      - '5433:5432'
+    restart: unless-stopped
+    healthcheck:
+      test: [ 'CMD-SHELL', 'pg_isready -U ${MLFLOW_DB_USER:-mlflow} -d ${MLFLOW_DB_NAME:-mlflowdb}' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mlflow:
+    container_name: mlflow
+    image: ghcr.io/mlflow/mlflow:v3.9.0
+    depends_on:
+      mlflow-postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      bucket-init:
+        condition: service_completed_successfully
+    environment:
+      MLFLOW_TRACKING_URI: http://0.0.0.0:5001
+      MLFLOW_LOGGING_LEVEL: ERROR
+      MLFLOW_SERVER_ALLOWED_HOSTS: '*'
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - '5001:5001'
+    command: >
+      /bin/sh -c "pip install --no-cache-dir psycopg2-binary boto3 && mlflow server --backend-store-uri postgresql://${MLFLOW_DB_USER:-mlflow}:${MLFLOW_DB_PASSWORD:-mlflow}@mlflow-postgres:5432/${MLFLOW_DB_NAME:-mlflowdb} --artifacts-destination s3://mlflow-artifacts/ --serve-artifacts --host 0.0.0.0 --port 5001"
+    restart: unless-stopped
 
   # ============================================================================
   # Aesthetic Scoring Services
@@ -189,6 +236,8 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: aesthetic-hub-data
+      MLFLOW_TRACKING_URI: http://mlflow:5001
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       IMMICH_SERVER_URL: http://immich_server:2283
       INTERACTION_FLUSH_SIZE: 100
       INFERENCE_FLUSH_SIZE: 50
@@ -201,9 +250,11 @@ services:
         condition: service_healthy
       bucket-init:
         condition: service_completed_successfully
+      mlflow:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -238,7 +289,7 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: ['CMD-SHELL', 'curl -f http://localhost:8000/health || exit 1']
+      test: [ 'CMD-SHELL', 'curl -f http://localhost:8000/health || exit 1' ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -256,8 +307,7 @@ services:
       - '8010:8000'
     restart: unless-stopped
     healthcheck:
-      test:
-        ['CMD-SHELL', 'curl -f http://localhost:8000/v2/health/ready || exit 1']
+      test: [ 'CMD-SHELL', 'curl -f http://localhost:8000/v2/health/ready || exit 1' ]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -302,5 +352,6 @@ services:
 volumes:
   model-cache:
   minio-data:
+  mlflow-postgres-data:
   prometheus-data:
   grafana-data:
