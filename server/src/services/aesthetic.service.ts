@@ -11,7 +11,7 @@ export class AestheticService {
 
   constructor(private readonly logger: LoggingRepository) {
     this.logger.setContext(AestheticService.name);
-    this.serviceUrl = process.env.AESTHETIC_SERVICE_URL ?? 'http://aesthetic-service:8002';
+    this.serviceUrl = process.env.AESTHETIC_SERVICE_URL ?? 'http://aesthetic-service:8000';
     _instance = this;
   }
 
@@ -87,7 +87,9 @@ export class AestheticService {
       const eventTime = new Date().toISOString();
       // Add random component to ensure uniqueness even for rapid events
       const randomSuffix = Math.random().toString(36).substring(2, 15);
-      const eventId = createHash('sha256').update(`${assetId}${userId}${eventType}${eventTime}${randomSuffix}`).digest('hex');
+      const eventId = createHash('sha256')
+        .update(`${assetId}${userId}${eventType}${eventTime}${randomSuffix}`)
+        .digest('hex');
 
       const response = await fetch(`${this.serviceUrl}/events/interaction`, {
         method: 'POST',

@@ -1,27 +1,35 @@
-# Canary environment: receives a small fraction of real traffic to validate
-# a new model version before full promotion to production.
-# Traffic split is enforced at the Immich proxy/ingress level by the serving team.
-
 replicaCount: 1
 
-scoringService:
+aestheticService:
   image:
-    repository: somaditya24/aesthetic-scoring-service
-    tag: v3
+    repository: ghcr.io/binti-p/aesthetic-service
+    tag: '05874a393dbbe73048acc7b13bb69f6527734c4a'
     pullPolicy: IfNotPresent
   port: 8000
-  # Model URI injected by the promote-model Argo Workflow
-  modelUri: "models:/aesthetic-scorer/canary"
-  mlflowTrackingUri: "http://mlflow.platform.svc.cluster.local:5000"
+
+postgres:
+  host: 'immich-postgres.aesthetic-hub.svc.cluster.local'
+  port: 5432
+  database: 'immich'
+  user: 'immich'
+
+minio:
+  endpointUrl: 'http://minio.platform.svc.cluster.local:9000'
+  bucket: 'triton-models'
+  modelStage: 'canary'
+
+immichServer:
+  url: 'http://immich-server.aesthetic-hub.svc.cluster.local:2283'
 
 triton:
   enabled: true
+  useTriton: true
   image:
     repository: nvcr.io/nvidia/tritonserver
-    tag: "24.10-py3"
+    tag: '24.10-py3'
   port: 8000
   metricsPort: 8002
-  modelRepository: "s3://triton-models/canary"
+  modelRepository: 's3://triton-models/canary'
   resources:
     requests:
       cpu: 500m
@@ -32,7 +40,6 @@ triton:
 
 service:
   type: ClusterIP
-  externalIP: ""
 
 resources:
   requests:
@@ -42,13 +49,9 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-# Traffic weight for canary (10% of scoring requests go here).
-# Managed via Immich's nginx config / ingress annotations.
 canary:
   weight: 10
 
-# Promotion gates: serving team monitors these and triggers the
-# promote-model workflow when all gates pass.
 promotionGates:
   minAccuracy: 0.80
   maxErrorRate: 0.02

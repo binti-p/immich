@@ -1,45 +1,59 @@
 """
-Runs ONNX Runtime in-process instead of calling Triton over HTTP.
+Scorer: runs inference via in-process ONNX Runtime (local dev) or Triton (k8s).
+Controlled by USE_TRITON env var (default: false).
 """
 import logging
+import os
 import numpy as np
-import onnxruntime as rt
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+USE_TRITON = os.environ.get("USE_TRITON", "false").lower() in ("true", "1", "yes")
 LOW_CONF_THRESHOLD = 0.15
 DIVERGENCE_THRESHOLD = 0.40
 
 
 class Scorer:
     def __init__(self, global_model_path: str, personalized_model_path: Optional[str] = None):
-        logger.info(f"[scorer] Loading global model from {global_model_path}")
-        self.global_sess = rt.InferenceSession(
-            global_model_path,
-            providers=["CPUExecutionProvider"],
-        )
-        self.personalized_sess: Optional[rt.InferenceSession] = None
-        if personalized_model_path:
-            try:
-                logger.info(f"[scorer] Loading personalized model from {personalized_model_path}")
-                self.personalized_sess = rt.InferenceSession(
-                    personalized_model_path,
-                    providers=["CPUExecutionProvider"],
-                )
-            except Exception as e:
-                logger.warning(f"[scorer] Failed to load personalized model: {e} — cold-start only")
+        self.use_triton = USE_TRITON
+        self.personalized_available = False
+        self.model_version: Optional[str] = None
 
-        self.model_version: Optional[str] = None  # set by model_loader after download
+        if self.use_triton:
+            import triton_client
+            self._triton = triton_client
+            self.personalized_available = True  # Triton always has both models loaded
+            logger.info("[scorer] Using Triton for inference")
+        else:
+            import onnxruntime as rt
+            logger.info(f"[scorer] Loading global model from {global_model_path}")
+            self.global_sess = rt.InferenceSession(
+                global_model_path,
+                providers=["CPUExecutionProvider"],
+            )
+            self.personalized_sess = None
+            if personalized_model_path:
+                try:
+                    logger.info(f"[scorer] Loading personalized model from {personalized_model_path}")
+                    self.personalized_sess = rt.InferenceSession(
+                        personalized_model_path,
+                        providers=["CPUExecutionProvider"],
+                    )
+                    self.personalized_available = True
+                except Exception as e:
+                    logger.warning(f"[scorer] Failed to load personalized model: {e} — cold-start only")
 
     def _run_global(self, clip_emb: np.ndarray) -> float:
-        """global_mlp: input[768] → output[1]"""
+        if self.use_triton:
+            return self._triton.infer_global(clip_emb)
         inp = clip_emb.reshape(1, 768).astype(np.float32)
         result = self.global_sess.run(["output"], {"input": inp})
         return float(result[0][0][0])
 
     def _run_personalized(self, clip_emb: np.ndarray, user_emb: np.ndarray) -> float:
-        """personalized_mlp: image_embedding[768] + user_embedding[64] → output[1]"""
+        if self.use_triton:
+            return self._triton.infer_personalized(clip_emb, user_emb)
         clip_inp = clip_emb.reshape(1, 768).astype(np.float32)
         user_inp = user_emb.reshape(1, 64).astype(np.float32)
         result = self.personalized_sess.run(
@@ -67,7 +81,7 @@ class Scorer:
             not is_cold_start
             and user_emb is not None
             and alpha > 0
-            and self.personalized_sess is not None
+            and self.personalized_available
         ):
             try:
                 p_score = self._run_personalized(clip_emb, user_emb)

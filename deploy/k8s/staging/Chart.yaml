@@ -1,6 +1,6 @@
 apiVersion: v2
 name: aesthetic-hub-staging
-description: Staging deployment of the Aesthetic Hub ML scoring service
+description: Staging deployment of the Aesthetic Service (scoring + personalization)
 type: application
-version: 0.1.0
-appVersion: "1.0.0"
+version: 0.2.0
+appVersion: '2.0.0'

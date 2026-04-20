@@ -1,20 +1,20 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: aesthetic-scoring-staging
+  name: aesthetic-service-staging
   namespace: aesthetic-hub-staging
   labels:
-    app: aesthetic-scoring
+    app: aesthetic-service
     track: staging
 spec:
   type: ClusterIP
   selector:
-    app: aesthetic-scoring
+    app: aesthetic-service
     track: staging
   ports:
     - name: http
-      port: {{ .Values.scoringService.port }}
-      targetPort: {{ .Values.scoringService.port }}
+      port: {{ .Values.aestheticService.port }}
+      targetPort: {{ .Values.aestheticService.port }}
 {{- if .Values.triton.enabled }}
 ---
 apiVersion: v1

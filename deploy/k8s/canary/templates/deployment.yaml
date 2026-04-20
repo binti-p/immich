@@ -1,63 +1,67 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: aesthetic-scoring-canary
+  name: aesthetic-service-canary
   namespace: aesthetic-hub-canary
   labels:
-    app: aesthetic-scoring
+    app: aesthetic-service
     track: canary
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: aesthetic-scoring
+      app: aesthetic-service
       track: canary
   template:
     metadata:
       labels:
-        app: aesthetic-scoring
+        app: aesthetic-service
         track: canary
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "{{ .Values.scoringService.port }}"
+        prometheus.io/port: "{{ .Values.aestheticService.port }}"
     spec:
       containers:
-        - name: scoring-service
-          image: "{{ .Values.scoringService.image.repository }}:{{ .Values.scoringService.image.tag }}"
-          imagePullPolicy: {{ .Values.scoringService.image.pullPolicy }}
+        - name: aesthetic-service
+          image: "{{ .Values.aestheticService.image.repository }}:{{ .Values.aestheticService.image.tag }}"
+          imagePullPolicy: {{ .Values.aestheticService.image.pullPolicy }}
           env:
-            - name: MODEL_URI
-              value: "{{ .Values.scoringService.modelUri }}"
-            - name: MLFLOW_TRACKING_URI
-              value: "{{ .Values.scoringService.mlflowTrackingUri }}"
+            - name: POSTGRES_HOST
+              value: "{{ .Values.postgres.host }}"
+            - name: POSTGRES_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: POSTGRES_DB
+              value: "{{ .Values.postgres.database }}"
+            - name: POSTGRES_USER
+              value: "{{ .Values.postgres.user }}"
+            - name: POSTGRES_PASSWORD
+              value: "immich"
+            - name: AWS_ENDPOINT_URL
+              value: "{{ .Values.minio.endpointUrl }}"
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: accesskey
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secretkey
+            - name: MINIO_BUCKET
+              value: "{{ .Values.minio.bucket }}"
+            - name: MODEL_STAGE
+              value: "{{ .Values.minio.modelStage }}"
+            - name: IMMICH_SERVER_URL
+              value: "{{ .Values.immichServer.url }}"
+            - name: USE_TRITON
+              value: "{{ .Values.triton.useTriton }}"
             - name: TRITON_HOST
               value: "triton-canary"
             - name: TRITON_PORT
               value: "{{ .Values.triton.port }}"
-            - name: ENVIRONMENT
-              value: canary
-            - name: MODEL_VERSION
-              value: "v1"
-            - name: POSTGRES_HOST
-              value: "data-pipeline-postgres.aesthetic-hub.svc.cluster.local"
-            - name: POSTGRES_PORT
-              value: "5432"
-            - name: POSTGRES_DB
-              value: "aesthetic_hub"
-            - name: POSTGRES_USER
-              value: "postgres"
-              # valueFrom:
-              #   secretKeyRef:
-              #     name: immich-postgres-secret
-              #     key: username
-            - name: POSTGRES_PASSWORD
-              value: "postgres123"
-              # valueFrom:
-              #   secretKeyRef:
-              #     name: immich-postgres-secret
-              #     key: password
           ports:
-            - containerPort: {{ .Values.scoringService.port }}
+            - containerPort: {{ .Values.aestheticService.port }}
               name: http
           resources:
             requests:
@@ -69,13 +73,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: {{ .Values.scoringService.port }}
-            initialDelaySeconds: 10
+              port: {{ .Values.aestheticService.port }}
+            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /health
-              port: {{ .Values.scoringService.port }}
+              port: {{ .Values.aestheticService.port }}
             initialDelaySeconds: 30
             periodSeconds: 30
 {{- if .Values.triton.enabled }}
@@ -125,9 +129,9 @@ spec:
                   name: minio-credentials
                   key: secretkey
             - name: TRITON_AWS_ENDPOINT
-              value: "http://minio.platform.svc.cluster.local:9000"
+              value: "{{ .Values.minio.endpointUrl }}"
             - name: AWS_ENDPOINT_URL
-              value: "http://minio.platform.svc.cluster.local:9000"
+              value: "{{ .Values.minio.endpointUrl }}"
           ports:
             - containerPort: {{ .Values.triton.port }}
               name: http
