@@ -1,7 +1,6 @@
 """
 All database access for aesthetic-service.
 Uses asyncpg for async FastAPI compatibility.
-Absorbed and extended from scoring-service/db.py.
 """
 import logging
 import os
@@ -228,7 +227,6 @@ async def upsert_aesthetic_score(
     is_cold_start: bool,
     request_id: str,
 ):
-    """Absorbed from scoring-service/db.py upsert_aesthetic_score."""
     async with _pool.acquire() as conn:
         await conn.execute(
             """
@@ -251,7 +249,6 @@ async def upsert_aesthetic_score(
 # ── Immich callback ───────────────────────────────────────────────────────────
 
 async def notify_immich(asset_id: str, user_id: str, score: float, model_version: Optional[str]):
-    """Absorbed from scoring-service/db.py notify_immich — now async with httpx."""
     immich_url = os.environ.get("IMMICH_SERVER_URL")
     if not immich_url:
         return
