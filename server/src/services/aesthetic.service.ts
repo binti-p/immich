@@ -11,8 +11,7 @@ export class AestheticService {
 
   constructor(private readonly logger: LoggingRepository) {
     this.logger.setContext(AestheticService.name);
-    this.serviceUrl =
-      process.env.AESTHETIC_SERVICE_URL ?? 'http://aesthetic-service:8002';
+    this.serviceUrl = process.env.AESTHETIC_SERVICE_URL ?? 'http://aesthetic-service:8002';
     _instance = this;
   }
 
@@ -32,11 +31,15 @@ export class AestheticService {
 
   private async _registerUser(userId: string): Promise<void> {
     try {
-      await fetch(`${this.serviceUrl}/users/register`, {
+      const response = await fetch(`${this.serviceUrl}/users/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId }),
       });
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        this.logger.warn(`[aesthetic] registerUser returned ${response.status} for user ${userId}: ${body}`);
+      }
     } catch (error) {
       this.logger.error(`[aesthetic] registerUser failed for user ${userId}: ${error}`);
     }
@@ -54,11 +57,15 @@ export class AestheticService {
 
   private async _scoreImage(assetId: string, userId: string): Promise<void> {
     try {
-      await fetch(`${this.serviceUrl}/score-image`, {
+      const response = await fetch(`${this.serviceUrl}/score-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ asset_id: assetId, user_id: userId }),
       });
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        this.logger.warn(`[aesthetic] scoreImage returned ${response.status} for asset ${assetId}: ${body}`);
+      }
     } catch (error) {
       this.logger.error(`[aesthetic] scoreImage failed for asset ${assetId}: ${error}`);
     }
@@ -75,19 +82,12 @@ export class AestheticService {
     });
   }
 
-  private async _recordInteraction(
-    assetId: string,
-    userId: string,
-    eventType: string,
-    label: number,
-  ): Promise<void> {
+  private async _recordInteraction(assetId: string, userId: string, eventType: string, label: number): Promise<void> {
     try {
       const eventTime = new Date().toISOString();
-      const eventId = createHash('sha256')
-        .update(`${assetId}${userId}${eventType}${eventTime}`)
-        .digest('hex');
+      const eventId = createHash('sha256').update(`${assetId}${userId}${eventType}${eventTime}`).digest('hex');
 
-      await fetch(`${this.serviceUrl}/events/interaction`, {
+      const response = await fetch(`${this.serviceUrl}/events/interaction`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -100,10 +100,14 @@ export class AestheticService {
           event_time: eventTime,
         }),
       });
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        this.logger.warn(
+          `[aesthetic] recordInteraction returned ${response.status} for asset ${assetId} event ${eventType}: ${body}`,
+        );
+      }
     } catch (error) {
-      this.logger.error(
-        `[aesthetic] recordInteraction failed for asset ${assetId} event ${eventType}: ${error}`,
-      );
+      this.logger.error(`[aesthetic] recordInteraction failed for asset ${assetId} event ${eventType}: ${error}`);
     }
   }
 }
