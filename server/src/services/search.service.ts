@@ -66,6 +66,7 @@ export class SearchService extends BaseService {
         ...dto,
         checksum,
         userIds,
+        rankingUserId: auth.user.id,
         orderDirection: dto.order ?? AssetOrder.Desc,
       },
     );
@@ -139,7 +140,7 @@ export class SearchService extends BaseService {
     const size = dto.size || 100;
     const { hasNextPage, items } = await this.searchRepository.searchSmart(
       { page, size },
-      { ...dto, userIds: await userIds, embedding },
+      { ...dto, userIds: await userIds, embedding, rankingUserId: auth.user.id },
     );
 
     return this.mapResponse(items, hasNextPage ? (page + 1).toString() : null, { auth });

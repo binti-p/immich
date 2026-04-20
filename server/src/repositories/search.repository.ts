@@ -98,6 +98,7 @@ export interface SearchAlbumOptions {
 
 export interface SearchOrderOptions {
   orderDirection?: 'asc' | 'desc';
+  rankingUserId?: string;
 }
 
 export interface SearchPaginationOptions {
@@ -129,7 +130,8 @@ export type SmartSearchOptions = SearchDateOptions &
   SearchUserIdOptions &
   SearchPeopleOptions &
   SearchTagOptions &
-  SearchOcrOptions;
+  SearchOcrOptions &
+  SearchOrderOptions;
 
 export type OcrSearchOptions = SearchDateOptions & SearchOcrOptions;
 
@@ -197,6 +199,11 @@ export class SearchRepository {
     const orderDirection = (options.orderDirection?.toLowerCase() || 'desc') as OrderByDirection;
     const items = await searchAssetBuilder(this.db, options)
       .selectAll('asset')
+      .leftJoin('aesthetic_scores', (join) =>
+        join.onRef('asset.id', '=', 'aesthetic_scores.assetId').on('aesthetic_scores.userId', '=', options.rankingUserId!),
+      )
+      .orderBy(sql`CASE WHEN aesthetic_scores.score IS NULL THEN 1 ELSE 0 END`)
+      .orderBy('aesthetic_scores.score', 'desc')
       .orderBy('asset.fileCreatedAt', orderDirection)
       .limit(pagination.size + 1)
       .offset((pagination.page - 1) * pagination.size)
@@ -287,7 +294,13 @@ export class SearchRepository {
       const items = await searchAssetBuilder(trx, options)
         .selectAll('asset')
         .innerJoin('smart_search', 'asset.id', 'smart_search.assetId')
+        .leftJoin('aesthetic_scores', (join) =>
+          join.onRef('asset.id', '=', 'aesthetic_scores.assetId').on('aesthetic_scores.userId', '=', options.rankingUserId!),
+        )
         .orderBy(sql`smart_search.embedding <=> ${options.embedding}`)
+        .orderBy(sql`CASE WHEN aesthetic_scores.score IS NULL THEN 1 ELSE 0 END`)
+        .orderBy('aesthetic_scores.score', 'desc')
+        .orderBy('asset.fileCreatedAt', 'desc')
         .limit(pagination.size + 1)
         .offset((pagination.page - 1) * pagination.size)
         .execute();
