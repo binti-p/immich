@@ -85,7 +85,9 @@ export class AestheticService {
   private async _recordInteraction(assetId: string, userId: string, eventType: string, label: number): Promise<void> {
     try {
       const eventTime = new Date().toISOString();
-      const eventId = createHash('sha256').update(`${assetId}${userId}${eventType}${eventTime}`).digest('hex');
+      // Add random component to ensure uniqueness even for rapid events
+      const randomSuffix = Math.random().toString(36).substring(2, 15);
+      const eventId = createHash('sha256').update(`${assetId}${userId}${eventType}${eventTime}${randomSuffix}`).digest('hex');
 
       const response = await fetch(`${this.serviceUrl}/events/interaction`, {
         method: 'POST',

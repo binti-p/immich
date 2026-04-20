@@ -1,5 +1,4 @@
 """
-Absorbed from scoring-service/triton_client.py + scoring-service/main.py blend logic.
 Runs ONNX Runtime in-process instead of calling Triton over HTTP.
 """
 import logging
@@ -58,7 +57,6 @@ class Scorer:
     ) -> Tuple[float, float, Optional[float], float, bool]:
         """
         Returns (final_score, global_score, personalized_score, effective_alpha, low_confidence).
-        Mirrors the blend logic from scoring-service/main.py _score().
         """
         g_score = self._run_global(clip_emb)
 
