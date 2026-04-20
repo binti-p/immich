@@ -31,4 +31,10 @@ export class InferenceLogTable {
 
   @Column({ type: 'timestamp with time zone' })
   computedAt!: Timestamp;
+
+  @Column({ default: 'success' })
+  status!: string;
+
+  @Column({ nullable: true, type: 'text' })
+  errorMessage!: string | null;
 }

@@ -88,14 +88,13 @@ def register_model_version(card: dict, dry_run: bool):
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            # Deactivate any currently active non-cold-start model
+            # Deactivate any currently active model
             cur.execute(
                 """
                 UPDATE model_versions
                 SET "deactivatedAt" = NOW()
                 WHERE "activatedAt" IS NOT NULL
                   AND "deactivatedAt" IS NULL
-                  AND "isColdStart" = false
                 """
             )
             deactivated = cur.rowcount
@@ -105,8 +104,8 @@ def register_model_version(card: dict, dry_run: bool):
                 """
                 INSERT INTO model_versions
                     ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
-                     "isColdStart", "activatedAt", "createdAt")
-                VALUES (%s, %s, %s, %s, false, NOW(), NOW())
+                     "activatedAt", "createdAt")
+                VALUES (%s, %s, %s, %s, NOW(), NOW())
                 ON CONFLICT ("versionId") DO UPDATE SET
                     "activatedAt"   = NOW(),
                     "deactivatedAt" = NULL

@@ -291,6 +291,26 @@ export class AssetService extends BaseService {
       throw new BadRequestException('Asset not found');
     }
 
+    // Aesthetic interaction hooks — fire-and-forget
+    if (rest.isFavorite !== undefined) {
+      if (rest.isFavorite === true) {
+        this.aestheticService.recordInteraction(id, auth.user.id, 'favorite', 0.8);
+      } else {
+        this.aestheticService.recordInteraction(id, auth.user.id, 'unfavorite', 0.0);
+      }
+    }
+    if (rest.visibility !== undefined) {
+      if (rest.visibility === AssetVisibility.Archive) {
+        this.aestheticService.recordInteraction(id, auth.user.id, 'archive', 0.1);
+      } else if (rest.visibility === AssetVisibility.Timeline) {
+        // Check if it was previously archived (unarchive action)
+        const previousAsset = await this.findOrFail(id);
+        if (previousAsset.visibility === AssetVisibility.Archive) {
+          this.aestheticService.recordInteraction(id, auth.user.id, 'unarchive', 0.5);
+        }
+      }
+    }
+
     return mapAsset(asset, { auth });
   }
 
@@ -343,16 +363,26 @@ export class AssetService extends BaseService {
     // Aesthetic interaction hooks — fire-and-forget per asset
     if (isFavorite === true) {
       for (const id of ids) {
-        this.aestheticService.recordInteraction(id, auth.user.id, 'favorite', 1.0);
+        this.aestheticService.recordInteraction(id, auth.user.id, 'favorite', 0.8);
       }
     } else if (isFavorite === false) {
       for (const id of ids) {
         this.aestheticService.recordInteraction(id, auth.user.id, 'unfavorite', 0.0);
       }
     }
-    if (visibility === AssetVisibility.Archive) {
-      for (const id of ids) {
-        this.aestheticService.recordInteraction(id, auth.user.id, 'archive', 0.1);
+    if (visibility !== undefined) {
+      if (visibility === AssetVisibility.Archive) {
+        for (const id of ids) {
+          this.aestheticService.recordInteraction(id, auth.user.id, 'archive', 0.1);
+        }
+      } else if (visibility === AssetVisibility.Timeline) {
+        // Check which assets were previously archived (unarchive action)
+        const assets = await this.assetRepository.getByIds(ids);
+        for (const asset of assets) {
+          if (asset.visibility === AssetVisibility.Archive) {
+            this.aestheticService.recordInteraction(asset.id, auth.user.id, 'unarchive', 0.5);
+          }
+        }
       }
     }
     if (visibility === AssetVisibility.Locked) {
@@ -785,6 +815,9 @@ export class AssetService extends BaseService {
     const newEdits = await this.assetEditRepository.replaceAll(id, edits);
     await this.jobRepository.queue({ name: JobName.AssetEditThumbnailGeneration, data: { id } });
 
+    // Aesthetic: record edit/enhance interaction
+    this.aestheticService.recordInteraction(id, auth.user.id, 'edit', 0.8);
+
     // Return the asset and its applied edits
     return {
       assetId: id,
@@ -872,5 +905,13 @@ export class AssetService extends BaseService {
 
     // Sort by aesthetic score using utility function
     return sortByAestheticScore(assetsWithScores);
+  }
+
+  recordCopyLink(auth: AuthDto, id: string): void {
+    this.aestheticService.recordInteraction(id, auth.user.id, 'copy_link', 0.7);
+  }
+
+  recordSearchClick(auth: AuthDto, id: string): void {
+    this.aestheticService.recordInteraction(id, auth.user.id, 'search_click', 1.0);
   }
 }

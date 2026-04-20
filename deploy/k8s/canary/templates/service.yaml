@@ -1,20 +1,20 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: aesthetic-scoring-canary
+  name: aesthetic-service-canary
   namespace: aesthetic-hub-canary
   labels:
-    app: aesthetic-scoring
+    app: aesthetic-service
     track: canary
 spec:
   type: ClusterIP
   selector:
-    app: aesthetic-scoring
+    app: aesthetic-service
     track: canary
   ports:
     - name: http
-      port: {{ .Values.scoringService.port }}
-      targetPort: {{ .Values.scoringService.port }}
+      port: {{ .Values.aestheticService.port }}
+      targetPort: {{ .Values.aestheticService.port }}
 {{- if .Values.triton.enabled }}
 ---
 apiVersion: v1

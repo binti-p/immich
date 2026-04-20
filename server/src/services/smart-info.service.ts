@@ -5,11 +5,13 @@ import { OnEvent, OnJob } from 'src/decorators';
 import { AssetVisibility, DatabaseLock, ImmichWorker, JobName, JobStatus, QueueName } from 'src/enum';
 import { ArgOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
+import { AestheticService } from 'src/services/aesthetic.service';
 import { JobItem, JobOf } from 'src/types';
 import { getCLIPModelInfo, isSmartSearchEnabled } from 'src/utils/misc';
 
 @Injectable()
 export class SmartInfoService extends BaseService {
+
   @OnEvent({ name: 'ConfigInit', workers: [ImmichWorker.Microservices] })
   async onConfigInit({ newConfig }: ArgOf<'ConfigInit'>) {
     await this.init(newConfig);
@@ -122,6 +124,24 @@ export class SmartInfoService extends BaseService {
     }
 
     await this.searchRepository.upsert(asset.id, embedding);
+
+    // Trigger aesthetic scoring after CLIP embedding is ready
+    // This ensures scoring happens when the embedding is available, not immediately after upload
+    try {
+      // Get aesthetic service instance using the singleton pattern
+      const aestheticService = AestheticService.instance;
+      if (aestheticService) {
+        // Fetch full asset to get ownerId
+        const fullAsset = await this.assetRepository.getById(asset.id);
+        if (fullAsset) {
+          aestheticService.scoreImage(fullAsset.id, fullAsset.ownerId);
+          this.logger.debug(`[aesthetic] Triggered scoring for asset ${fullAsset.id} after CLIP completion`);
+        }
+      }
+    } catch (error) {
+      // Non-fatal - aesthetic scoring is optional
+      this.logger.warn(`[aesthetic] Failed to trigger scoring for asset ${asset.id}: ${error}`);
+    }
 
     return JobStatus.Success;
   }

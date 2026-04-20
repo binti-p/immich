@@ -27,8 +27,6 @@ services:
       REDIS_PORT: 6379
 
       AESTHETIC_SERVICE_URL: ${AESTHETIC_SERVICE_URL:-http://aesthetic-service:8000}
-      # Feature Service (Scoring Service)
-      FEATURE_SERVICE_URL: http://scoring-service:8000
       ENABLE_AESTHETIC_SCORING: ${ENABLE_AESTHETIC_SCORING:-true}
 
       # Logging
@@ -42,7 +40,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      scoring-service:
+      aesthetic-service:
         condition: service_started
       immich-machine-learning:
         condition: service_started
@@ -125,42 +123,22 @@ services:
 
   bucket-init:
     container_name: immich_bucket_init
-    image: minio/mc
+    image: python:3.11-slim
     depends_on:
       minio:
         condition: service_healthy
     volumes:
       - ../triton-models:/triton-models:ro
-      - ../aesthetic/pipelines/batch:/scripts:ro
-    entrypoint: [ "sh", "-c" ]
-    command:
-      - |
-        mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}
-        mc mb --ignore-existing myminio/aesthetic-hub-data
-
-        # Seed cold-start global model (permanent)
-        mc cp /triton-models/global_mlp/1/model.onnx myminio/aesthetic-hub-data/models/global/personalized_mlp.onnx
-
-        # Seed versioned stub model (v0000-00-00 = bootstrap version)
-        mc cp /triton-models/personalized_mlp/1/model.onnx myminio/aesthetic-hub-data/models/v0000-00-00/personalized_mlp.onnx
-
-        # Seed bootstrap checkpoint for first retraining warm-start if provided
-        if [ -f /scripts/bootstrap_personalized_model.pth ]; then
-          mc cp /scripts/bootstrap_personalized_model.pth myminio/aesthetic-hub-data/models/v0000-00-00/best_personalized_model.pth
-        else
-          echo "bootstrap_personalized_model.pth not found; skipping checkpoint seed"
-        fi
-
-        # Seed empty user_embeddings.parquet
-        mc cp /scripts/empty_embeddings.parquet myminio/aesthetic-hub-data/models/v0000-00-00/user_embeddings.parquet
-
-        # Seed model_card.json for bootstrap version
-        printf '{"version_id":"v0000-00-00","dataset_version":"bootstrap","mlp_object_key":"models/v0000-00-00/personalized_mlp.onnx","checkpoint_object_key":"models/v0000-00-00/best_personalized_model.pth","embeddings_object_key":"models/v0000-00-00/user_embeddings.parquet","quality_gates":{"passed":true},"training_details":{"note":"bootstrap stub model"},"architecture":{"clip_dim":768,"user_embedding_dim":64,"input_dim":832}}' | mc pipe myminio/aesthetic-hub-data/models/v0000-00-00/model_card.json
-
-        # Create MLflow artifacts bucket
-        mc mb --ignore-existing myminio/mlflow-artifacts
-
-        echo "Bucket aesthetic-hub-data ready. Models seeded."
+      - ../aesthetic/pipelines:/pipelines:ro
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      PYTHONPATH: /pipelines
+    command: >
+      bash -c "
+        pip install --quiet minio &&
+        python3 -m pipelines.batch.bucket_init
+      "
     restart: "no"
 
   # ============================================================================
@@ -254,45 +232,11 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  scoring-service:
-    container_name: scoring_service
-    build:
-      context: ../scoring-service
-      dockerfile: Dockerfile
-    environment:
-      # Point scoring service at the Immich postgres DB
-      POSTGRES_HOST: immich_postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
-      POSTGRES_USER: ${DB_USERNAME:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
-      TRITON_HOST: triton
-      TRITON_PORT: 8000
-      LOG_LEVEL: ${SCORING_LOG_LEVEL:-INFO}
-      ENVIRONMENT: ${ENVIRONMENT:-production}
-      MODEL_VERSION: ${MODEL_VERSION:-stub-v1}
-      IMMICH_SERVER_URL: http://immich_server:2283
-    ports:
-      - '8001:8000'
-    volumes:
-      - ${UPLOAD_LOCATION:-../uploads}:/data:ro
-    depends_on:
-      immich_postgres:
-        condition: service_healthy
-      triton:
-        condition: service_started
-    restart: unless-stopped
-    healthcheck:
       test: [ 'CMD-SHELL', 'curl -f http://localhost:8000/health || exit 1' ]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   triton:
     container_name: triton

@@ -241,4 +241,28 @@ export class AssetController {
   removeAssetEdits(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<void> {
     return this.service.removeAssetEdits(auth, id);
   }
+
+  @Post(':id/interaction/copy-link')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Authenticated({ permission: Permission.AssetRead })
+  @Endpoint({
+    summary: 'Record copy link interaction',
+    description: 'Record when a user copies a link to an asset.',
+    history: new HistoryBuilder().added('v1').beta('v1').stable('v2'),
+  })
+  recordCopyLink(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): void {
+    return this.service.recordCopyLink(auth, id);
+  }
+
+  @Post(':id/interaction/search-click')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Authenticated({ permission: Permission.AssetRead })
+  @Endpoint({
+    summary: 'Record search result click',
+    description: 'Record when a user clicks on an asset from search results.',
+    history: new HistoryBuilder().added('v1').beta('v1').stable('v2'),
+  })
+  recordSearchClick(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): void {
+    return this.service.recordSearchClick(auth, id);
+  }
 }

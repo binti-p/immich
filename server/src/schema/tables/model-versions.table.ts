@@ -15,9 +15,6 @@ export class ModelVersionsTable {
   @Column()
   embeddingsObjectKey!: string;
 
-  @Column({ type: 'boolean', default: false })
-  isColdStart!: Generated<boolean>;
-
   @Column({ type: 'timestamp with time zone', nullable: true })
   activatedAt!: Timestamp | null;
 

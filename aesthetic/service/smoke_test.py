@@ -3,7 +3,7 @@
 Smoke test for the aesthetic-service.
 Called by Argo after staging deployment.
 
-Unlike the old scoring-service smoke test, aesthetic-service fetches CLIP
+Aesthetic-service fetches CLIP
 embeddings from the DB itself, so we need to seed test data first.
 This script:
   1. Inserts a dummy asset + CLIP embedding into smart_search
@@ -177,7 +177,7 @@ try:
             "user_id": TEST_USER_ID,
             "event_type": "view",
             "label": 0.8,
-            "source": "smoke_test",
+            "source": "immich_upload",
             "event_time": "2025-01-01T00:00:00Z",
         },
         timeout=5,
@@ -196,7 +196,7 @@ try:
             "user_id": TEST_USER_ID,
             "event_type": "view",
             "label": 0.8,
-            "source": "smoke_test",
+            "source": "immich_upload",
             "event_time": "2025-01-01T00:00:00Z",
         },
         timeout=5,
