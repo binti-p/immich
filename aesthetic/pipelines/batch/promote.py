@@ -20,6 +20,7 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+import numpy as np
 import psycopg2
 import psycopg2.extras
 import pyarrow.parquet as pq
@@ -174,6 +175,117 @@ def load_user_embeddings(card: dict, dry_run: bool):
         conn.close()
 
 
+# ── Step 3b: Held-out test set evaluation (E3.5) ─────────────────────────────
+def evaluate_held_out(card: dict, dry_run: bool) -> float | None:
+    """
+    Load test.parquet, run new ONNX model directly, compute Spearman-r vs labels.
+    Compare to previous model version. Abort if regression > 0.05.
+    Returns the Spearman-r or None if test set unavailable.
+    """
+    from scipy.stats import spearmanr
+    import io as _io
+    import onnxruntime as rt
+
+    client = _s3()
+
+    # Load test.parquet
+    try:
+        obj = client.get_object(Bucket=BUCKET, Key="datasets/personalized-flickr/test.parquet")
+        table = pq.read_table(_io.BytesIO(obj["Body"].read()))
+        df = table.to_pandas()
+        log.info(f"[E3.5] Loaded test.parquet: {len(df)} rows")
+    except Exception as e:
+        log.warning(f"[E3.5] Could not load test.parquet: {e} — skipping held-out eval")
+        return None
+
+    if len(df) < 5:
+        log.warning("[E3.5] test.parquet has <5 rows — skipping held-out eval")
+        return None
+
+    # Download new model
+    mlp_key = card["mlp_object_key"]
+    try:
+        obj = client.get_object(Bucket=BUCKET, Key=mlp_key)
+        model_bytes = _io.BytesIO(obj["Body"].read())
+        sess = rt.InferenceSession(model_bytes.read(), providers=["CPUExecutionProvider"])
+    except Exception as e:
+        log.warning(f"[E3.5] Could not load ONNX model for eval: {e} — skipping")
+        return None
+
+    # Run inference on test set
+    predictions = []
+    labels = []
+    for _, row in df.iterrows():
+        clip_emb = np.array(row["clip_embedding"], dtype=np.float32).reshape(1, 768)
+        # Use global model path (input name "input")
+        try:
+            result = sess.run(["output"], {"input": clip_emb})
+            predictions.append(float(result[0][0][0]))
+            labels.append(float(row["label"]))
+        except Exception:
+            # Try personalized model input names
+            try:
+                user_emb = np.zeros((1, 64), dtype=np.float32)
+                result = sess.run(["output"], {"image_embedding": clip_emb, "user_embedding": user_emb})
+                predictions.append(float(result[0][0][0]))
+                labels.append(float(row["label"]))
+            except Exception as e2:
+                log.warning(f"[E3.5] Inference failed for row: {e2}")
+
+    if len(predictions) < 5:
+        log.warning("[E3.5] Not enough successful predictions for Spearman-r")
+        return None
+
+    r, _ = spearmanr(predictions, labels)
+    r = round(float(r), 4)
+    log.info(f"[E3.5] Held-out Spearman-r = {r}")
+
+    # Compare to previous model version
+    try:
+        resp = client.list_objects_v2(Bucket=BUCKET, Prefix="models/v", Delimiter="/")
+        versions = sorted(
+            [cp["Prefix"].rstrip("/").split("/")[-1]
+             for cp in resp.get("CommonPrefixes", [])
+             if cp["Prefix"].rstrip("/").split("/")[-1].startswith("v")
+             and cp["Prefix"].rstrip("/").split("/")[-1] != f"v{card['version_id']}"],
+            reverse=True,
+        )
+        if versions:
+            prev_key = f"models/{versions[0]}/model_card.json"
+            prev_obj = client.get_object(Bucket=BUCKET, Key=prev_key)
+            prev_card = json.loads(prev_obj["Body"].read())
+            prev_r = prev_card.get("quality_gates", {}).get("held_out_test_spearman_r")
+            if prev_r is not None and (prev_r - r) > 0.05:
+                log.error(f"[E3.5] Regression detected: new={r} vs prev={prev_r} (diff={prev_r-r:.3f} > 0.05) — aborting")
+                raise SystemExit(1)
+            log.info(f"[E3.5] vs previous model: new={r}, prev={prev_r}")
+    except SystemExit:
+        raise
+    except Exception as e:
+        log.info(f"[E3.5] Could not compare to previous model: {e}")
+
+    if dry_run:
+        log.info(f"[E3.5][dry-run] Would write held_out_test_spearman_r={r} to model_card.json")
+        return r
+
+    # Write result back to model_card.json
+    try:
+        obj = client.get_object(Bucket=BUCKET, Key=f"models/v{card['version_id']}/model_card.json")
+        updated_card = json.loads(obj["Body"].read())
+        updated_card.setdefault("quality_gates", {})["held_out_test_spearman_r"] = r
+        client.put_object(
+            Bucket=BUCKET,
+            Key=f"models/v{card['version_id']}/model_card.json",
+            Body=json.dumps(updated_card, indent=2).encode(),
+            ContentType="application/json",
+        )
+        log.info(f"[E3.5] Updated model_card.json with held_out_test_spearman_r={r}")
+    except Exception as e:
+        log.warning(f"[E3.5] Could not update model_card.json: {e}")
+
+    return r
+
+
 # ── Step 4: Reload model in aesthetic-service ────────────────────────────────
 def reload_aesthetic_service(dry_run: bool):
     aesthetic_url = os.environ.get("AESTHETIC_SERVICE_URL", "http://aesthetic-service:8002")
@@ -238,6 +350,9 @@ def main():
 
     register_model_version(card, args.dry_run)
     load_user_embeddings(card, args.dry_run)
+
+    # E3.5: Held-out evaluation before reload
+    evaluate_held_out(card, args.dry_run)
 
     if not args.skip_rescore:
         reload_aesthetic_service(args.dry_run)  # load new model first

@@ -48,8 +48,24 @@ SCORE_IMAGE_DURATION = Histogram(
     buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5],
 )
 COLD_START_TOTAL = Counter("cold_start_total", "Cold-start scoring events")
-MINIO_FLUSH_TOTAL = minio_client.MINIO_FLUSH_TOTAL   # re-export
-MINIO_FLUSH_ERRORS = minio_client.MINIO_FLUSH_ERRORS  # re-export
+LOW_CONFIDENCE_TOTAL = Counter("low_confidence_total", "Low-confidence scoring events")  # E3.2
+
+# E3.1 — Score distribution histogram
+AESTHETIC_SCORE_HISTOGRAM = Histogram(
+    "aesthetic_score",
+    "Distribution of aesthetic scores",
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
+# E3.4 — Active model version as unix timestamp gauge
+from prometheus_client import Gauge
+ACTIVE_MODEL_VERSION_TIMESTAMP = Gauge(
+    "aesthetic_active_model_version_timestamp",
+    "Unix timestamp of active model version (0 if bootstrap/unknown)",
+)
+
+MINIO_FLUSH_TOTAL = minio_client.MINIO_FLUSH_TOTAL
+MINIO_FLUSH_ERRORS = minio_client.MINIO_FLUSH_ERRORS
 
 # ── Global scorer instance ────────────────────────────────────────────────────
 scorer: Scorer = None
@@ -73,6 +89,9 @@ async def lifespan(app: FastAPI):
         f"personalized={'yes' if pers_path else 'no (cold-start only)'}"
     )
 
+    # E3.4 — set model version gauge
+    _set_model_version_gauge(version)
+
     yield
 
     # Shutdown — flush remaining buffers
@@ -85,6 +104,20 @@ app.mount("/metrics", make_asgi_app())
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+def _set_model_version_gauge(version: str | None):
+    """E3.4 — encode version date as unix timestamp, or 0 for bootstrap."""
+    if version and version not in ("v0000-00-00", "0000-00-00"):
+        try:
+            v = version.lstrip("v")
+            from datetime import datetime, timezone
+            ts = datetime.strptime(v, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+            ACTIVE_MODEL_VERSION_TIMESTAMP.set(ts)
+            return
+        except Exception:
+            pass
+    ACTIVE_MODEL_VERSION_TIMESTAMP.set(0)
+
 
 @app.get("/health")
 async def health():
@@ -116,6 +149,8 @@ async def reload_model():
         # Atomic swap — in-flight requests finish with old scorer, new requests get new one
         scorer = new_scorer
         active_model_version = version
+
+        _set_model_version_gauge(version)  # E3.4
 
         logger.info(
             f"[reload] Model reloaded — version={version}, "
@@ -208,6 +243,8 @@ async def score_image(req: ScoreImageRequest):
 
     if is_cold_start:
         COLD_START_TOTAL.inc()
+    if low_confidence:
+        LOW_CONFIDENCE_TOTAL.inc()  # E3.2
 
     request_id = str(uuid.uuid4())
 
@@ -250,6 +287,7 @@ async def score_image(req: ScoreImageRequest):
     })
 
     SCORE_IMAGE_DURATION.observe(time.time() - start)
+    AESTHETIC_SCORE_HISTOGRAM.observe(round(final_score, 4))  # E3.1
 
     return ScoreImageResponse(
         request_id=request_id,

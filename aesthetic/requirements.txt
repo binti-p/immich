@@ -1,0 +1,31 @@
+# Shared requirements for aesthetic-service and pipelines
+# Used by aesthetic/service/Dockerfile
+
+# Web framework
+fastapi==0.111.0
+uvicorn==0.29.0
+
+# Async postgres (service)
+asyncpg==0.29.0
+httpx==0.27.0
+
+# Sync postgres (pipelines)
+psycopg2-binary==2.9.9
+
+# ML inference
+onnxruntime==1.18.0
+numpy==1.26.4
+
+# Object store
+boto3==1.34.0
+
+# Data
+pyarrow==14.0.1
+pandas==2.1.4
+scipy==1.13.0
+
+# Observability
+prometheus-client==0.20.0
+
+# HTTP (pipelines)
+requests==2.31.0
