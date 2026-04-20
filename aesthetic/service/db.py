@@ -93,16 +93,32 @@ async def event_exists(event_id: str) -> bool:
 # ── Writes ────────────────────────────────────────────────────────────────────
 
 async def upsert_user(user_id: str):
-    """Upsert into user_interaction_counts (register user)."""
+    """
+    Register a new user:
+    - Upserts user_interaction_counts (count=0)
+    - Inserts a zero-vector into user_embeddings so personalized model runs immediately
+      with alpha=0 (global dominates until interactions accumulate)
+    """
+    zero_vector = [0.0] * 64  # 64-dim user embedding, all zeros
+
     async with _pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO user_interaction_counts ("userId", "interactionCount", "updatedAt")
-            VALUES ($1::uuid, 0, NOW())
-            ON CONFLICT ("userId") DO NOTHING
-            """,
-            user_id,
-        )
+        async with conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO user_interaction_counts ("userId", "interactionCount", "updatedAt")
+                VALUES ($1::uuid, 0, NOW())
+                ON CONFLICT ("userId") DO NOTHING
+                """,
+                user_id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO user_embeddings ("userId", embedding, "modelVersion", "updatedAt")
+                VALUES ($1::uuid, $2::double precision[], NULL, NOW())
+                ON CONFLICT ("userId") DO NOTHING
+                """,
+                user_id, zero_vector,
+            )
 
 
 async def insert_interaction_event(
@@ -152,6 +168,18 @@ async def insert_inference_log(
     alpha: float,
 ):
     async with _pool.acquire() as conn:
+        # Ensure model_version exists in model_versions table (FK constraint)
+        if model_version:
+            await conn.execute(
+                """
+                INSERT INTO model_versions
+                    ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
+                     "isColdStart", "activatedAt", "createdAt")
+                VALUES ($1, $1, '', '', false, NOW(), NOW())
+                ON CONFLICT ("versionId") DO NOTHING
+                """,
+                model_version,
+            )
         await conn.execute(
             """
             INSERT INTO inference_log

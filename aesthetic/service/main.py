@@ -12,6 +12,7 @@ Flow for POST /score-image:
   8. Buffer to MinIO inference-log parquet
   9. Return score to NestJS
 """
+import asyncio
 import logging
 import os
 import uuid
@@ -94,6 +95,42 @@ async def health():
     }
 
 
+@app.post("/admin/reload-model")
+async def reload_model():
+    """
+    Re-downloads models from MinIO and reinitializes the ONNX scorer in-place.
+    Called by promote.py after a new model is written to MinIO.
+    Rescore-all should only be triggered AFTER this returns 200.
+    """
+    global scorer, active_model_version
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+
+    try:
+        # Run blocking download in thread pool so we don't block the event loop
+        global_path, pers_path, version = await loop.run_in_executor(None, download_models)
+        new_scorer = Scorer(global_path, pers_path)
+        new_scorer.model_version = version
+
+        # Atomic swap — in-flight requests finish with old scorer, new requests get new one
+        scorer = new_scorer
+        active_model_version = version
+
+        logger.info(
+            f"[reload] Model reloaded — version={version}, "
+            f"personalized={'yes' if pers_path else 'no'}"
+        )
+        return {
+            "status": "reloaded",
+            "model_version": version,
+            "personalized_model_loaded": pers_path is not None,
+        }
+    except Exception as e:
+        logger.error(f"[reload] Model reload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Model reload failed: {e}")
+
+
 @app.post("/users/register", response_model=RegisterUserResponse)
 async def register_user(req: RegisterUserRequest):
     await db.upsert_user(req.user_id)
@@ -137,8 +174,15 @@ async def score_image(req: ScoreImageRequest):
     import time
     start = time.time()
 
-    # 1. Read CLIP embedding
-    clip_list = await db.get_clip_embedding(req.asset_id)
+    # 1. Read CLIP embedding — retry up to 3 times with backoff (ML indexing is async)
+    clip_list = None
+    for attempt in range(3):
+        clip_list = await db.get_clip_embedding(req.asset_id)
+        if clip_list is not None:
+            break
+        if attempt < 2:
+            await asyncio.sleep(5 * (attempt + 1))  # 5s, 10s
+
     if clip_list is None:
         raise HTTPException(status_code=404, detail="No CLIP embedding found for asset")
 
@@ -151,7 +195,8 @@ async def score_image(req: ScoreImageRequest):
     n = await db.get_interaction_count(req.user_id)
 
     user_emb = np.array(user_list, dtype=np.float32) if user_list else None
-    is_cold_start = user_emb is None
+    # is_cold_start = user has no trained embedding (zero vector or missing)
+    is_cold_start = user_emb is None or float(np.linalg.norm(user_emb)) < 1e-6
 
     # 3. Compute alpha
     alpha = n / (n + 10) if n > 0 else 0.0

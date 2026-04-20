@@ -108,7 +108,7 @@ services:
       POSTGRES_DB: ${DB_DATABASE_NAME:-immich}
       POSTGRES_INITDB_ARGS: '--data-checksums'
     volumes:
-      - ${DB_DATA_LOCATION:-../postgres-data}:/var/lib/postgresql/data
+      - ${DB_DATA_LOCATION:-../docker/postgres-data}:/var/lib/postgresql/data
     shm_size: 128mb
     ports:
       - '5432:5432'
@@ -150,13 +150,26 @@ services:
         condition: service_healthy
     volumes:
       - ../triton-models:/triton-models:ro
+      - ../aesthetic/pipelines/batch:/scripts:ro
     entrypoint: ["sh", "-c"]
     command:
       - |
         mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}
         mc mb --ignore-existing myminio/aesthetic-hub-data
+
+        # Seed cold-start global model (permanent)
         mc cp /triton-models/global_mlp/1/model.onnx myminio/aesthetic-hub-data/models/global/personalized_mlp.onnx
-        echo "Bucket aesthetic-hub-data ready. Global model seeded."
+
+        # Seed versioned stub model (v0000-00-00 = bootstrap version)
+        mc cp /triton-models/personalized_mlp/1/model.onnx myminio/aesthetic-hub-data/models/v0000-00-00/personalized_mlp.onnx
+
+        # Seed empty user_embeddings.parquet
+        mc cp /scripts/empty_embeddings.parquet myminio/aesthetic-hub-data/models/v0000-00-00/user_embeddings.parquet
+
+        # Seed model_card.json for bootstrap version
+        printf '{"version_id":"v0000-00-00","dataset_version":"bootstrap","mlp_object_key":"models/v0000-00-00/personalized_mlp.onnx","embeddings_object_key":"models/v0000-00-00/user_embeddings.parquet","quality_gates":{"passed":true},"training_details":{"note":"bootstrap stub model"},"architecture":{"clip_dim":768,"user_embedding_dim":64,"input_dim":832}}' | mc pipe myminio/aesthetic-hub-data/models/v0000-00-00/model_card.json
+
+        echo "Bucket aesthetic-hub-data ready. Models seeded."
     restart: "no"
 
   # ============================================================================
@@ -175,8 +188,8 @@ services:
   aesthetic-service:
     container_name: aesthetic_service
     build:
-      context: ../aesthetic/service
-      dockerfile: Dockerfile
+      context: ../aesthetic
+      dockerfile: service/Dockerfile
     environment:
       POSTGRES_HOST: immich_postgres
       POSTGRES_PORT: 5432

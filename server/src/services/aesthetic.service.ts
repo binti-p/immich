@@ -22,6 +22,27 @@ export class AestheticService {
   }
 
   /**
+   * Fire-and-forget: POST /users/register to aesthetic-service.
+   * Called when a new Immich user is created. Initializes interaction counts
+   * and zero-vector embedding so scoring works from first upload.
+   */
+  registerUser(userId: string): void {
+    this._registerUser(userId).catch(() => {});
+  }
+
+  private async _registerUser(userId: string): Promise<void> {
+    try {
+      await fetch(`${this.serviceUrl}/users/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      });
+    } catch (error) {
+      this.logger.error(`[aesthetic] registerUser failed for user ${userId}: ${error}`);
+    }
+  }
+
+  /**
    * Fire-and-forget: POST /score-image to aesthetic-service.
    * Called after upload completes. Never blocks the upload response.
    */
