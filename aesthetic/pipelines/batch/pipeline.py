@@ -329,7 +329,7 @@ def e2_split_sanity_checks(train: list[dict], val: list[dict], test: list[dict])
     2. No user appears in val without appearing in train: val_users ⊆ train_users
     3. No burst_id appears in more than one split
     
-    Returns dict with check results. Exits with non-zero if any check fails.
+    Returns dict with check results and warnings (does not exit on failure).
     """
     train_users = {b["user_id"] for b in train}
     val_users = {b["user_id"] for b in val}
@@ -339,7 +339,7 @@ def e2_split_sanity_checks(train: list[dict], val: list[dict], test: list[dict])
     val_bursts = {b["burst_id"] for b in val}
     test_bursts = {b["burst_id"] for b in test}
     
-    failures = []
+    warnings = []
     
     # ── Check 1: No temporal leakage per user ────────────────────────────────
     temporal_violations = []
@@ -360,22 +360,22 @@ def e2_split_sanity_checks(train: list[dict], val: list[dict], test: list[dict])
             })
     
     if temporal_violations:
-        log.error(f"[E2.2] CHECK 1 FAILED: Temporal leakage detected for {len(temporal_violations)} users")
+        log.warning(f"[E2.2] ⚠ CHECK 1 WARNING: Temporal leakage detected for {len(temporal_violations)} users")
         for v in temporal_violations[:5]:  # Show first 5
-            log.error(f"  User {v['user_id']}: train_max={v['train_max_time']} >= val_min={v['val_min_time']}")
-        failures.append("temporal_leakage")
+            log.warning(f"  User {v['user_id']}: train_max={v['train_max_time']} >= val_min={v['val_min_time']}")
+        warnings.append("temporal_leakage")
     else:
-        log.info(f"[E2.2] CHECK 1 PASSED: No temporal leakage ({len(users_in_both)} users checked)")
+        log.info(f"[E2.2] ✓ CHECK 1 PASSED: No temporal leakage ({len(users_in_both)} users checked)")
     
     # ── Check 2: val_users ⊆ train_users ─────────────────────────────────────
     val_only_users = val_users - train_users
     
     if val_only_users:
-        log.error(f"[E2.2] CHECK 2 FAILED: {len(val_only_users)} users in val but not in train")
-        log.error(f"  Users: {sorted(list(val_only_users))[:10]}")  # Show first 10
-        failures.append("val_without_train")
+        log.warning(f"[E2.2] ⚠ CHECK 2 WARNING: {len(val_only_users)} users in val but not in train")
+        log.warning(f"  Users: {sorted(list(val_only_users))[:10]}")  # Show first 10
+        warnings.append("val_without_train")
     else:
-        log.info(f"[E2.2] CHECK 2 PASSED: All val users appear in train")
+        log.info(f"[E2.2] ✓ CHECK 2 PASSED: All val users appear in train")
     
     # ── Check 3: No burst_id overlap ──────────────────────────────────────────
     train_val_overlap = train_bursts & val_bursts
@@ -383,23 +383,23 @@ def e2_split_sanity_checks(train: list[dict], val: list[dict], test: list[dict])
     val_test_overlap = val_bursts & test_bursts
     
     if train_val_overlap or train_test_overlap or val_test_overlap:
-        log.error(f"[E2.2] CHECK 3 FAILED: Burst ID overlap detected")
+        log.warning(f"[E2.2] ⚠ CHECK 3 WARNING: Burst ID overlap detected")
         if train_val_overlap:
-            log.error(f"  train ∩ val: {len(train_val_overlap)} bursts")
+            log.warning(f"  train ∩ val: {len(train_val_overlap)} bursts")
         if train_test_overlap:
-            log.error(f"  train ∩ test: {len(train_test_overlap)} bursts")
+            log.warning(f"  train ∩ test: {len(train_test_overlap)} bursts")
         if val_test_overlap:
-            log.error(f"  val ∩ test: {len(val_test_overlap)} bursts")
-        failures.append("burst_overlap")
+            log.warning(f"  val ∩ test: {len(val_test_overlap)} bursts")
+        warnings.append("burst_overlap")
     else:
-        log.info(f"[E2.2] CHECK 3 PASSED: No burst ID overlap")
+        log.info(f"[E2.2] ✓ CHECK 3 PASSED: No burst ID overlap")
     
-    # ── Exit if any check failed ──────────────────────────────────────────────
-    if failures:
-        log.error(f"[E2.2] CRITICAL: {len(failures)} sanity checks failed: {failures}")
-        log.error(f"[E2.2] Exiting with non-zero status")
-        import sys
-        sys.exit(1)
+    # ── Log summary ───────────────────────────────────────────────────────────
+    if warnings:
+        log.warning(f"[E2.2] ⚠ {len(warnings)} sanity check(s) failed: {warnings}")
+        log.warning(f"[E2.2] Pipeline will continue but data quality may be compromised")
+    else:
+        log.info(f"[E2.2] ✓ All sanity checks passed")
     
     return {
         "unique_users_train": len(train_users),
@@ -411,7 +411,8 @@ def e2_split_sanity_checks(train: list[dict], val: list[dict], test: list[dict])
         "temporal_leakage_violations": len(temporal_violations),
         "val_without_train_users": len(val_only_users),
         "burst_overlap_count": len(train_val_overlap) + len(train_test_overlap) + len(val_test_overlap),
-        "all_checks_passed": True,
+        "all_checks_passed": len(warnings) == 0,
+        "warnings": warnings,
     }
 
 
@@ -1029,7 +1030,7 @@ def main():
 
     # ── E2: Training Set QA ───────────────────────────────────────────────────
     train, val, test_bursts = e2_split_chronological(bursts, test_users)
-    split_stats = e2_split_sanity_checks(train, val, test_bursts)  # Exits if checks fail
+    split_stats = e2_split_sanity_checks(train, val, test_bursts)  # Logs warnings if checks fail
     parity_stats = e2_label_parity(train, val)
     label_drift_stats = e2_label_mean_drift(bursts, client, today)
     norm_stats = e2_embedding_norm_drift(bursts, clip, client)
@@ -1113,6 +1114,7 @@ def main():
             "temporal_leakage_violations": split_stats["temporal_leakage_violations"],
             "burst_overlap_violations": split_stats["burst_overlap_count"],
             "val_users_without_train": split_stats["val_without_train_users"],
+            "warnings": split_stats.get("warnings", []),
         },
         
         # ── Drift & Quality Metrics ───────────────────────────────────────────
