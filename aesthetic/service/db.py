@@ -166,17 +166,20 @@ async def upsert_model_version(
 ):
     """
     Upsert model version on startup.
-    The model_versions table has a unique partial index on isColdStart=false,
-    so only one non-cold-start version can be active. We deactivate the
-    previous active version first, then insert/update the new one.
+    The model_versions table has a unique partial index on activatedAt IS NOT NULL,
+    so only one active version can exist. We deactivate the previous active version
+    first, then insert/update the new one.
     """
     async with _pool.acquire() as conn:
         async with conn.transaction():
-            # Deactivate any existing active (non-cold-start) version
+            # Deactivate any existing active version
             await conn.execute(
                 """
-                UPDATE model_versions SET "isColdStart" = true
-                WHERE "isColdStart" = false AND "versionId" != $1
+                UPDATE model_versions 
+                SET "deactivatedAt" = NOW()
+                WHERE "activatedAt" IS NOT NULL 
+                  AND "deactivatedAt" IS NULL 
+                  AND "versionId" != $1
                 """,
                 version_id,
             )
@@ -185,11 +188,11 @@ async def upsert_model_version(
                 """
                 INSERT INTO model_versions
                     ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
-                     "isColdStart", "activatedAt", "createdAt")
-                VALUES ($1, $2, $3, $4, false, NOW(), NOW())
+                     "activatedAt", "createdAt")
+                VALUES ($1, $2, $3, $4, NOW(), NOW())
                 ON CONFLICT ("versionId") DO UPDATE SET
-                    "isColdStart" = false,
-                    "activatedAt" = NOW()
+                    "activatedAt" = NOW(),
+                    "deactivatedAt" = NULL
                 """,
                 version_id,
                 dataset_version or version_id,

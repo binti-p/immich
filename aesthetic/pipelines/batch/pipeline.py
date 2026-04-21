@@ -1,5 +1,5 @@
 """
-Batch pipeline — runs weekly (Sunday 2am UTC).
+Batch pipeline — runs weekly
 
 Checkpoints:
   E1: Ingestion QA   — schema validation, volume gate, signal distribution, CLIP coverage
