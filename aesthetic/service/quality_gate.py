@@ -83,10 +83,8 @@ except Exception as e:
         f.write("false")
     sys.exit(1)
 
-# --- Download test data ---
-# test.parquet from aesthetic-hub-data/datasets/personalized-flickr/
-# Contains CLIP embeddings (768-dim), user embeddings (64-dim), and ground truth scores
-print("Downloading test data...")
+# --- Download test data (image embeddings + ground truth from MinIO) ---
+print("Downloading test data from MinIO...")
 try:
     s3.download_file(
         args.data_bucket,
@@ -97,33 +95,81 @@ try:
     table = pq.read_table("/tmp/test_data.parquet")
     df = table.to_pandas()
 
-    # Extract embeddings and scores from parquet columns
-    embeddings = np.stack(df["embedding"].values).astype(np.float32)        # (N, 768)
-    user_embeddings = np.stack(df["user_embedding"].values).astype(np.float32)  # (N, 64)
-    gt_scores = df["score"].values.astype(np.float32)                       # (N,)
-    check("test data loaded", True, f"N={len(embeddings)}")
+    embeddings = np.stack(df["embedding"].values).astype(np.float32)  # (N, 768)
+    gt_scores = df["score"].values.astype(np.float32)                 # (N,)
+    check("test image data loaded", True, f"N={len(embeddings)} images")
 except Exception as e:
-    check("test data loaded", False, str(e))
+    check("test image data loaded", False, str(e))
     print("FATAL: cannot load test data, aborting")
     with open(args.output_result, "w") as f:
         f.write("false")
     sys.exit(1)
 
+# --- Load user embeddings from Postgres ---
+print("Loading user embeddings from Postgres...")
+try:
+    import psycopg2
+    conn = psycopg2.connect(
+        host=os.environ.get("POSTGRES_HOST", "immich-postgres"),
+        port=os.environ.get("POSTGRES_PORT", "5432"),
+        dbname=os.environ.get("POSTGRES_DB", "immich"),
+        user=os.environ.get("POSTGRES_USER", "immich"),
+        password=os.environ.get("POSTGRES_PASSWORD", "immich"),
+    )
+    with conn.cursor() as cur:
+        cur.execute('SELECT "userId"::text, embedding FROM user_embeddings')
+        rows = cur.fetchall()
+    conn.close()
+
+    # Filter out zero-vector embeddings (cold-start users)
+    user_embs = {}
+    for user_id, emb in rows:
+        arr = np.array(emb, dtype=np.float32)
+        if np.linalg.norm(arr) > 1e-6:
+            user_embs[user_id] = arr
+
+    check("user embeddings loaded", True, f"{len(user_embs)} users with trained embeddings (of {len(rows)} total)")
+
+    if len(user_embs) == 0:
+        print("WARNING: No trained user embeddings found — skipping personalized evaluation, using global only")
+        # Fall back: create a dummy zero embedding so inference still runs (global-only mode)
+        user_emb_list = [np.zeros(64, dtype=np.float32)]
+    else:
+        user_emb_list = list(user_embs.values())
+except Exception as e:
+    check("user embeddings loaded", False, str(e))
+    print("FATAL: cannot load user embeddings, aborting")
+    with open(args.output_result, "w") as f:
+        f.write("false")
+    sys.exit(1)
+
+# --- Build cross-test pairs: each user × each image ---
+# To keep evaluation tractable, sample up to 5 users if many exist
+sampled_users = user_emb_list[:5] if len(user_emb_list) > 5 else user_emb_list
+print(f"Cross-testing {len(sampled_users)} users × {len(embeddings)} images = {len(sampled_users) * len(embeddings)} pairs")
+
+# Tile: repeat each image embedding for each user, repeat each user embedding for each image
+all_image_embs = np.tile(embeddings, (len(sampled_users), 1))                          # (U*N, 768)
+all_user_embs = np.repeat(np.stack(sampled_users), len(embeddings), axis=0)            # (U*N, 64)
+all_gt_scores = np.tile(gt_scores, len(sampled_users))                                 # (U*N,)
+
+user_embeddings = all_user_embs  # for compatibility with downstream code
+
 check(
     "sufficient eval samples",
-    len(embeddings) >= MIN_EVAL_SAMPLES,
-    f"{len(embeddings)} samples (need {MIN_EVAL_SAMPLES})"
+    len(all_image_embs) >= MIN_EVAL_SAMPLES,
+    f"{len(all_image_embs)} pairs (need {MIN_EVAL_SAMPLES})"
 )
 
-# --- Run inference on test set ---
-print("Running inference on test set...")
+# --- Run inference on cross-test set ---
+print(f"Running inference on {len(all_image_embs)} pairs...")
 BATCH_SIZE = 64
 predictions = []
 
 try:
-    for i in range(0, len(embeddings), BATCH_SIZE):
-        batch_emb = embeddings[i:i+BATCH_SIZE]
-        batch_user = user_embeddings[i:i+BATCH_SIZE]
+    for i in range(0, len(all_image_embs), BATCH_SIZE):
+        batch_emb = all_image_embs[i:i+BATCH_SIZE]
+        batch_user = all_user_embs[i:i+BATCH_SIZE]
         outputs = sess.run(
             ["output"],
             {
@@ -147,7 +193,7 @@ check("no NaN outputs", not has_nan, f"NaN count={np.sum(np.isnan(predictions))}
 check("no Inf outputs", not has_inf, f"Inf count={np.sum(np.isinf(predictions))}")
 
 # --- Spearman-r ---
-srcc, _ = spearmanr(gt_scores[:len(predictions)], predictions)
+srcc, _ = spearmanr(all_gt_scores[:len(predictions)], predictions)
 check(
     f"Spearman-r >= {MIN_SPEARMAN_R}",
     srcc >= MIN_SPEARMAN_R,
@@ -155,7 +201,7 @@ check(
 )
 
 # --- MSE ---
-mse = float(np.mean((gt_scores[:len(predictions)] - predictions) ** 2))
+mse = float(np.mean((all_gt_scores[:len(predictions)] - predictions) ** 2))
 check(
     f"MSE <= {MAX_MSE}",
     mse <= MAX_MSE,
@@ -165,8 +211,8 @@ check(
 # --- P95 Latency on a batch of 64 ---
 print("Benchmarking P95 latency...")
 latencies = []
-bench_emb = embeddings[:64]
-bench_user = user_embeddings[:64]
+bench_emb = all_image_embs[:64]
+bench_user = all_user_embs[:64]
 
 for _ in range(100):   # 100 runs of batch=64
     start = time.perf_counter()

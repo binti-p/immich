@@ -304,6 +304,16 @@ spec:
           - --minio-endpoint={{workflow.parameters.minio-endpoint}}
           - --output-result=/tmp/quality-gate-passed.txt
         env:
+          - name: POSTGRES_HOST
+            value: 'immich-postgres.aesthetic-hub.svc.cluster.local'
+          - name: POSTGRES_PORT
+            value: '5432'
+          - name: POSTGRES_DB
+            value: 'immich'
+          - name: POSTGRES_USER
+            value: 'immich'
+          - name: POSTGRES_PASSWORD
+            value: 'immich'
           - name: AWS_ACCESS_KEY_ID
             valueFrom:
               secretKeyRef:
