@@ -30,6 +30,7 @@ PyYAML==6.0.1
 
 # Observability
 prometheus-client==0.20.0
+psutil==5.9.8
 
 # HTTP (pipelines)
 requests==2.31.0

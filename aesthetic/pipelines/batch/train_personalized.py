@@ -147,13 +147,22 @@ def active_model_version(conn) -> str | None:
 
 def read_model_card(client, version_id: str | None) -> dict | None:
     if not version_id:
+        log.info("No active model version found while reading model card")
         return None
     key = f"models/{version_id}/model_card.json"
     try:
         obj = client.get_object(Bucket=BUCKET, Key=key)
-    except Exception:
+    except Exception as error:
+        log.warning("Failed to read model card for %s at s3://%s/%s: %s", version_id, BUCKET, key, error)
         return None
-    return json.loads(obj["Body"].read())
+    card = json.loads(obj["Body"].read())
+    log.info(
+        "Loaded active model card for %s with keys: checkpoint_object_key=%s mlp_object_key=%s",
+        version_id,
+        card.get("checkpoint_object_key"),
+        card.get("mlp_object_key"),
+    )
+    return card
 
 
 def dataset_for_split(manifest: pd.DataFrame, split: str) -> pd.DataFrame:
@@ -165,6 +174,7 @@ def build_user_index(train_df: pd.DataFrame) -> dict[str, int]:
 
 
 def download_checkpoint_bundle(client, checkpoint_key: str, local_path: Path) -> dict | None:
+    log.info("Attempting to download warm-start checkpoint from s3://%s/%s", BUCKET, checkpoint_key)
     try:
         obj = client.get_object(Bucket=BUCKET, Key=checkpoint_key)
     except Exception as error:
@@ -172,7 +182,16 @@ def download_checkpoint_bundle(client, checkpoint_key: str, local_path: Path) ->
         return None
 
     local_path.write_bytes(obj["Body"].read())
-    return torch.load(local_path, map_location="cpu", weights_only=False)
+    bundle = torch.load(local_path, map_location="cpu", weights_only=False)
+    state_dict = bundle.get("model_state_dict")
+    log.info(
+        "Downloaded checkpoint to %s (has_model_state_dict=%s, num_users=%s, user_ids=%s)",
+        local_path,
+        isinstance(state_dict, dict),
+        bundle.get("num_users"),
+        len(bundle.get("user_ids", [])) if isinstance(bundle.get("user_ids"), list) else None,
+    )
+    return bundle
 
 
 def load_existing_user_embeddings(conn, user_ids: list[str], expected_dim: int) -> dict[str, np.ndarray]:
@@ -206,6 +225,12 @@ def load_existing_user_embeddings(conn, user_ids: list[str], expected_dim: int) 
             continue
         embeddings[row["user_id"]] = vector
 
+    log.info(
+        "Fetched %s/%s existing user embeddings from postgres.user_embeddings (expected_dim=%s)",
+        len(embeddings),
+        len(user_ids),
+        expected_dim,
+    )
     return embeddings
 
 
@@ -223,6 +248,7 @@ def warm_start_user_embeddings(model: PersonalizedMLP, user2idx: dict[str, int],
 
 def warm_start_model_weights(model: PersonalizedMLP, checkpoint_bundle: dict | None) -> bool:
     if not checkpoint_bundle:
+        log.info("Skipping model weight warm start because no checkpoint bundle was loaded")
         return False
 
     state_dict = checkpoint_bundle.get("model_state_dict")
@@ -241,6 +267,12 @@ def warm_start_model_weights(model: PersonalizedMLP, checkpoint_bundle: dict | N
         log.warning("Unexpected keys while warm-starting model weights: %s", unexpected)
     if missing and any(key != "user_embedding.weight" for key in missing):
         log.warning("Missing keys while warm-starting model weights: %s", missing)
+    log.info(
+        "Applied warm-start model weights (loaded_keys=%s, missing_keys=%s, unexpected_keys=%s)",
+        len(filtered_state_dict),
+        missing,
+        unexpected,
+    )
     return True
 
 
@@ -455,6 +487,7 @@ def main():
     conn = get_conn()
     try:
         current_version = active_model_version(conn)
+        log.info("Active model version for warm start: %s", current_version)
         existing_user_embeddings = load_existing_user_embeddings(
             conn,
             user_ids,
@@ -470,6 +503,12 @@ def main():
         if current_card and current_card.get("checkpoint_object_key"):
             checkpoint_source = current_card["checkpoint_object_key"]
             checkpoint_bundle = download_checkpoint_bundle(client, checkpoint_source, bootstrap_path)
+        else:
+            log.info(
+                "No checkpoint_object_key available for active version %s; current_card_present=%s",
+                current_version,
+                current_card is not None,
+            )
 
     train_loader = make_loader(train_df, user2idx, int(config["training"]["batch_size"]), True)
     val_loader = make_loader(val_df, user2idx, int(config["training"]["batch_size"]), False)
