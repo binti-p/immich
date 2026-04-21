@@ -39,27 +39,27 @@ time.sleep(args.observation_minutes * 60)
 
 print("Observation window complete. Querying Prometheus...")
 
-# These queries target the canary namespace specifically via the ENVIRONMENT label
-# which your scoring service sets as an env var
+# These queries target the canary namespace via the kubernetes namespace label
+# added by Prometheus service discovery
 window = f"{args.observation_minutes}m"
 
 error_rate = query(
-    f'sum(rate(scoring_errors_total{{environment="canary"}}[{window}])) '
-    f'/ sum(rate(scoring_latency_seconds_count{{environment="canary"}}[{window}]))'
+    f'sum(rate(cold_start_total{{namespace="aesthetic-hub-canary"}}[{window}])) '
+    f'/ sum(rate(score_image_request_duration_seconds_count{{namespace="aesthetic-hub-canary"}}[{window}]))'
 )
 
 p95_latency_ms = query(
     f'histogram_quantile(0.95, '
-    f'sum(rate(scoring_latency_seconds_bucket{{environment="canary"}}[{window}])) by (le)) * 1000'
+    f'sum(rate(score_image_request_duration_seconds_bucket{{namespace="aesthetic-hub-canary"}}[{window}])) by (le)) * 1000'
 )
 
 total_requests = query(
-    f'sum(increase(scoring_latency_seconds_count{{environment="canary"}}[{window}]))'
+    f'sum(increase(score_image_request_duration_seconds_count{{namespace="aesthetic-hub-canary"}}[{window}]))'
 )
 
 low_conf_rate = query(
-    f'sum(rate(scoring_low_confidence_total{{environment="canary"}}[{window}])) '
-    f'/ sum(rate(scoring_latency_seconds_count{{environment="canary"}}[{window}]))'
+    f'sum(rate(low_confidence_total{{namespace="aesthetic-hub-canary"}}[{window}])) '
+    f'/ sum(rate(score_image_request_duration_seconds_count{{namespace="aesthetic-hub-canary"}}[{window}]))'
 )
 
 print(f"Results:")
