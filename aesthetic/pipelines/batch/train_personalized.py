@@ -95,6 +95,10 @@ def s3():
 
 
 def load_manifest(client, dataset_version: str) -> pd.DataFrame:
+    """
+    Load retraining manifest (train + val splits only).
+    Test split is loaded separately from persistent test set.
+    """
     key = f"datasets/v{dataset_version}/personalized-flickr/retraining_manifest.parquet"
     obj = client.get_object(Bucket=BUCKET, Key=key)
     table = pq.read_table(io.BytesIO(obj["Body"].read()))
@@ -102,6 +106,10 @@ def load_manifest(client, dataset_version: str) -> pd.DataFrame:
 
 
 def load_persistent_test_manifest(client) -> pd.DataFrame | None:
+    """
+    Load permanent held-out test set (10% of users, created once on first pipeline run).
+    This test set is reused across all training runs for consistent evaluation.
+    """
     key = "datasets/personalized-flickr/test.parquet"
     try:
         obj = client.get_object(Bucket=BUCKET, Key=key)
@@ -333,21 +341,50 @@ def gate_candidate(
     candidate_metrics: dict[str, dict],
     thresholds: dict,
 ) -> dict:
+    """
+    Quality gate checks for model promotion.
+    
+    Required checks:
+    1. Minimum samples in val split (test is optional)
+    2. Val SRCC gain vs baseline (if baseline exists)
+    3. Val MAE/MSE regression limits
+    """
     checks: dict[str, dict] = {}
     passed = True
 
-    required_splits = ["val", "test"]
+    # Check 1: Minimum samples in val (test is optional now)
     min_eval_samples = int(thresholds.get("min_eval_samples", 5))
-    for split in required_splits:
-        samples = int(candidate_metrics[split]["samples"])
-        split_passed = samples >= min_eval_samples
-        checks[f"{split}_min_samples"] = {
-            "passed": split_passed,
-            "candidate": samples,
+    
+    # Val is required
+    if "val" in candidate_metrics:
+        val_samples = int(candidate_metrics["val"]["samples"])
+        val_passed = val_samples >= min_eval_samples
+        checks["val_min_samples"] = {
+            "passed": val_passed,
+            "candidate": val_samples,
             "minimum": min_eval_samples,
         }
-        passed &= split_passed
+        passed &= val_passed
+    else:
+        checks["val_min_samples"] = {
+            "passed": False,
+            "candidate": 0,
+            "minimum": min_eval_samples,
+        }
+        passed = False
+    
+    # Test is optional (may not exist on first run)
+    if "test" in candidate_metrics:
+        test_samples = int(candidate_metrics["test"]["samples"])
+        test_passed = test_samples >= min_eval_samples
+        checks["test_min_samples"] = {
+            "passed": test_passed,
+            "candidate": test_samples,
+            "minimum": min_eval_samples,
+        }
+        passed &= test_passed
 
+    # Check 2-3: Baseline comparison (only if baseline exists)
     previous_metrics = (current_card or {}).get("offline_metrics", {})
     baseline_version = (current_card or {}).get("version_id")
 
@@ -419,20 +456,32 @@ def main():
 
     client = s3()
     dataset_card = read_dataset_card(client, dataset_version)
+    
+    # Load manifest (train + val only)
     manifest = load_manifest(client, dataset_version)
     manifest["clip_embedding"] = manifest["clip_embedding"].apply(lambda value: np.asarray(value, dtype=np.float32))
+    
+    # Load persistent test set (10% held-out users, created once)
     persistent_test_manifest = load_persistent_test_manifest(client)
     if persistent_test_manifest is not None:
         persistent_test_manifest["clip_embedding"] = persistent_test_manifest["clip_embedding"].apply(
             lambda value: np.asarray(value, dtype=np.float32)
         )
 
+    # Split manifest into train and val
     train_df = dataset_for_split(manifest, "train")
     val_df = dataset_for_split(manifest, "val")
-    test_df = persistent_test_manifest if persistent_test_manifest is not None else dataset_for_split(manifest, "test")
+    
+    # Use persistent test set (always use this for consistent evaluation across runs)
+    test_df = persistent_test_manifest if persistent_test_manifest is not None else pd.DataFrame()
+    
     if train_df.empty:
         raise RuntimeError("Training split is empty; run data prep first or lower the sparse-user threshold.")
-
+    
+    if test_df.empty:
+        log.warning("No test set available - persistent test set not found. Evaluation will only use val split.")
+    
+    # Build user index from train set (all users in train due to chronological split)
     user2idx = build_user_index(train_df)
     user_ids = sorted(user2idx, key=user2idx.get)
     conn = get_conn()
@@ -463,7 +512,11 @@ def main():
 
     train_loader = make_loader(train_df, user2idx, int(config["training"]["batch_size"]), True)
     val_loader = make_loader(val_df, user2idx, int(config["training"]["batch_size"]), False)
-    test_loader = make_loader(test_df, user2idx, int(config["training"]["batch_size"]), False)
+    
+    # Only create test loader if test set exists
+    test_loader = None
+    if not test_df.empty:
+        test_loader = make_loader(test_df, user2idx, int(config["training"]["batch_size"]), False)
     device = config["training"]["device"]
     model = PersonalizedMLP(
         num_users=len(user2idx) + 1,
@@ -583,14 +636,26 @@ def main():
             split_metrics: dict[str, dict] = {}
             prediction_paths: dict[str, Path] = {}
 
-            for split_name, loader in [("val", val_loader), ("test", test_loader)]:
-                metrics, predictions = evaluate_personalized(model, loader, device)
-                split_metrics[split_name] = metrics
-                prediction_path = prediction_dir / f"{split_name}_predictions.csv"
-                predictions.to_csv(prediction_path, index=False)
-                prediction_paths[split_name] = prediction_path
-                log_metrics_safe({f"{split_name}_{metric}": value for metric, value in metrics.items() if metric != "samples"})
-                mlflow.log_metric(f"{split_name}_samples", metrics["samples"])
+            # Evaluate on val (always available)
+            val_metrics, val_predictions = evaluate_personalized(model, val_loader, device)
+            split_metrics["val"] = val_metrics
+            val_prediction_path = prediction_dir / "val_predictions.csv"
+            val_predictions.to_csv(val_prediction_path, index=False)
+            prediction_paths["val"] = val_prediction_path
+            log_metrics_safe({f"val_{metric}": value for metric, value in val_metrics.items() if metric != "samples"})
+            mlflow.log_metric("val_samples", val_metrics["samples"])
+            
+            # Evaluate on test (if available)
+            if test_loader is not None:
+                test_metrics, test_predictions = evaluate_personalized(model, test_loader, device)
+                split_metrics["test"] = test_metrics
+                test_prediction_path = prediction_dir / "test_predictions.csv"
+                test_predictions.to_csv(test_prediction_path, index=False)
+                prediction_paths["test"] = test_prediction_path
+                log_metrics_safe({f"test_{metric}": value for metric, value in test_metrics.items() if metric != "samples"})
+                mlflow.log_metric("test_samples", test_metrics["samples"])
+            else:
+                log.warning("Skipping test evaluation - no test set available")
 
             history_path = output_root / "history.csv"
             metrics_path = output_root / "metrics.csv"

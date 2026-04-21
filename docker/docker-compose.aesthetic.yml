@@ -136,7 +136,7 @@ services:
       PYTHONPATH: /pipelines
     command: >
       bash -c "
-        pip install --quiet minio &&
+        pip install --quiet minio pyarrow &&
         python3 -m pipelines.batch.bucket_init
       "
     restart: "no"
