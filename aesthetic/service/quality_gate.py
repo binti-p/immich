@@ -20,6 +20,7 @@ import onnxruntime as ort
 from botocore.client import Config
 from scipy.stats import spearmanr
 import os
+import json
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--criteria-file", default="/app/promotion-criteria.yaml")
@@ -181,9 +182,26 @@ check(
 # --- Final decision ---
 all_passed = all(passed for _, passed in RESULTS)
 
+# --- Safeguarding ---
 with open(args.output_result, "w") as f:
     f.write("true" if all_passed else "false")
 
 print(f"\n{'ALL QUALITY GATES PASSED' if all_passed else 'QUALITY GATE FAILED'}")
 print(f"Summary: {sum(p for _, p in RESULTS)}/{len(RESULTS)} checks passed")
+
+audit = {
+    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "model_key": args.model_key,
+    "passed": all_passed,
+    "checks": {name: passed for name, passed in RESULTS},
+    "owner": "serving-team"
+}
+with open("/tmp/audit.json", "w") as f:
+    json.dump(audit, f)
+s3.upload_file(
+    "/tmp/audit.json",
+    args.minio_bucket,
+    f"audit/quality-gate-{time.strftime('%Y%m%d-%H%M%S')}.json"
+)
+
 sys.exit(0 if all_passed else 1)

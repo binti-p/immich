@@ -46,3 +46,4 @@ class ScoreImageResponse(BaseModel):
     is_cold_start: bool
     model_version: Optional[str] = None
     low_confidence: bool
+    explanation: str = ""
