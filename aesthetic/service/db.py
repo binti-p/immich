@@ -166,23 +166,36 @@ async def upsert_model_version(
 ):
     """
     Upsert model version on startup.
-    Called by lifespan to ensure model_versions table has a row for the active model.
+    The model_versions table has a unique partial index on isColdStart=false,
+    so only one non-cold-start version can be active. We deactivate the
+    previous active version first, then insert/update the new one.
     """
     async with _pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO model_versions
-                ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
-                 "activatedAt", "createdAt")
-            VALUES ($1, $2, $3, $4, NOW(), NOW())
-            ON CONFLICT ("versionId") DO UPDATE SET
-                "activatedAt" = NOW()
-            """,
-            version_id,
-            dataset_version or version_id,
-            mlp_object_key,
-            embeddings_object_key,
-        )
+        async with conn.transaction():
+            # Deactivate any existing active (non-cold-start) version
+            await conn.execute(
+                """
+                UPDATE model_versions SET "isColdStart" = true
+                WHERE "isColdStart" = false AND "versionId" != $1
+                """,
+                version_id,
+            )
+            # Upsert the current version as active
+            await conn.execute(
+                """
+                INSERT INTO model_versions
+                    ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
+                     "isColdStart", "activatedAt", "createdAt")
+                VALUES ($1, $2, $3, $4, false, NOW(), NOW())
+                ON CONFLICT ("versionId") DO UPDATE SET
+                    "isColdStart" = false,
+                    "activatedAt" = NOW()
+                """,
+                version_id,
+                dataset_version or version_id,
+                mlp_object_key,
+                embeddings_object_key,
+            )
     logger.info(f"[db] Upserted model_version: {version_id}")
 
 
