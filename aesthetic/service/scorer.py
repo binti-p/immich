@@ -47,8 +47,13 @@ class Scorer:
     def _run_global(self, clip_emb: np.ndarray) -> float:
         if self.use_triton:
             return self._triton.infer_global(clip_emb)
-        inp = clip_emb.reshape(1, 768).astype(np.float32)
-        result = self.global_sess.run(["output"], {"input": inp})
+        clip_inp = clip_emb.reshape(1, 768).astype(np.float32)
+        # Global model uses zero user embedding for cold-start
+        zero_user_emb = np.zeros((1, 64), dtype=np.float32)
+        result = self.global_sess.run(
+            ["output"],
+            {"image_embedding": clip_inp, "user_embedding": zero_user_emb},
+        )
         return float(result[0][0][0])
 
     def _run_personalized(self, clip_emb: np.ndarray, user_emb: np.ndarray) -> float:
