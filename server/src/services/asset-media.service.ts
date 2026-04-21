@@ -315,8 +315,8 @@ export class AssetMediaService extends BaseService {
 
       await this.userRepository.updateUsage(auth.user.id, file.size);
 
-      // Trigger aesthetic scoring pipeline (fire-and-forget, never blocks upload)
-      this.aestheticService.scoreImage(asset.id, auth.user.id);
+      // Aesthetic scoring will be triggered automatically after CLIP job completes
+      // in smart-info.service.ts for better reliability
 
       return { id: asset.id, status: AssetMediaStatus.CREATED };
     } catch (error: any) {

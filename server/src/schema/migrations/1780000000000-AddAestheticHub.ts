@@ -7,16 +7,15 @@ export async function up(db: Kysely<any>): Promise<void> {
     "datasetVersion" character varying NOT NULL,
     "mlpObjectKey" character varying NOT NULL,
     "embeddingsObjectKey" character varying NOT NULL,
-    "isColdStart" boolean NOT NULL DEFAULT false,
     "activatedAt" timestamp with time zone,
     "deactivatedAt" timestamp with time zone,
     "createdAt" timestamp with time zone NOT NULL DEFAULT now(),
     CONSTRAINT "model_versions_pkey" PRIMARY KEY ("versionId")
   );`.execute(db);
 
-  // Partial unique index for active models
+  // Unique index for active models (only one active at a time)
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS "idx_model_versions_active"
-    ON "model_versions"("isColdStart")
+    ON "model_versions"("versionId")
     WHERE "activatedAt" IS NOT NULL AND "deactivatedAt" IS NULL;`.execute(db);
 
   // Table 2: user_embeddings

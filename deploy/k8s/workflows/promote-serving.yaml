@@ -2,7 +2,7 @@
 # Owned by: serving team
 # Triggered manually or by: train-and-evaluate completing successfully
 # Steps:
-#   1. smoke-test    — hit staging scoring service, verify basic correctness
+#   1. smoke-test    — hit staging aesthetic-service, verify basic correctness
 #   2. promote-to-canary — if smoke test passes, promote staging → canary
 #   3. observe-canary — wait 30min, query Prometheus, decide
 #   4. promote-to-production OR rollback
@@ -19,19 +19,19 @@ spec:
   arguments:
     parameters:
       - name: model-name
-        value: "aesthetic-scorer"
+        value: 'aesthetic-scorer'
       - name: mlflow-uri
-        value: "http://mlflow.platform.svc.cluster.local:5000"
+        value: 'http://mlflow.platform.svc.cluster.local:5000'
       - name: minio-endpoint
-        value: "http://minio.platform.svc.cluster.local:9000"
+        value: 'http://minio.platform.svc.cluster.local:9000'
       - name: prometheus-url
-        value: "http://prometheus.monitoring.svc.cluster.local:9090"
-      - name: staging-scoring-url
-        value: "http://aesthetic-scoring.aesthetic-hub-staging.svc.cluster.local:8000"
+        value: 'http://prometheus.monitoring.svc.cluster.local:9090'
+      - name: staging-service-url
+        value: 'http://aesthetic-service-staging.aesthetic-hub-staging.svc.cluster.local:8000'
       - name: observation-minutes
-        value: "30"
+        value: '30'
       - name: serving-image
-        value: "somaditya24/aesthetic-scoring-service:v4"
+        value: 'ghcr.io/binti-p/aesthetic-service:05874a393dbbe73048acc7b13bb69f6527734c4a'
 
   templates:
     - name: serving-pipeline
@@ -43,13 +43,13 @@ spec:
           - name: promote-staging-to-canary
             dependencies: [smoke-test-staging]
             template: call-promote-model
-            when: "{{tasks.smoke-test-staging.outputs.parameters.smoke-passed}} == true"
+            when: '{{tasks.smoke-test-staging.outputs.parameters.smoke-passed}} == true'
             arguments:
               parameters:
                 - name: from-stage
-                  value: "Staging"
+                  value: 'Staging'
                 - name: to-stage
-                  value: "Canary"
+                  value: 'Canary'
 
           - name: observe-canary
             dependencies: [promote-staging-to-canary]
@@ -58,29 +58,29 @@ spec:
           - name: promote-canary-to-production
             dependencies: [observe-canary]
             template: call-promote-model
-            when: "{{tasks.observe-canary.outputs.parameters.canary-decision}} == promote"
+            when: '{{tasks.observe-canary.outputs.parameters.canary-decision}} == promote'
             arguments:
               parameters:
                 - name: from-stage
-                  value: "Canary"
+                  value: 'Canary'
                 - name: to-stage
-                  value: "Production"
-            
+                  value: 'Production'
+
           - name: rescore-active-users
             dependencies: [promote-canary-to-production]
             template: run-rescore
-            when: "{{tasks.observe-canary.outputs.parameters.canary-decision}} == promote"
+            when: '{{tasks.observe-canary.outputs.parameters.canary-decision}} == promote'
 
           - name: rollback-canary
             dependencies: [observe-canary]
             template: call-promote-model
-            when: "{{tasks.observe-canary.outputs.parameters.canary-decision}} == rollback"
+            when: '{{tasks.observe-canary.outputs.parameters.canary-decision}} == rollback'
             arguments:
               parameters:
                 - name: from-stage
-                  value: "Canary"
+                  value: 'Canary'
                 - name: to-stage
-                  value: "Staging"   # demote back
+                  value: 'Staging'
 
     - name: run-smoke-test
       outputs:
@@ -89,11 +89,22 @@ spec:
             valueFrom:
               path: /tmp/smoke-passed.txt
       container:
-        image: "{{workflow.parameters.serving-image}}"
+        image: '{{workflow.parameters.serving-image}}'
         command: [python, smoke_test.py]
         args:
-          - --scoring-url={{workflow.parameters.staging-scoring-url}}
+          - --service-url={{workflow.parameters.staging-service-url}}
           - --output-result=/tmp/smoke-passed.txt
+        env:
+          - name: POSTGRES_HOST
+            value: 'immich-postgres.aesthetic-hub.svc.cluster.local'
+          - name: POSTGRES_PORT
+            value: '5432'
+          - name: POSTGRES_DB
+            value: 'immich'
+          - name: POSTGRES_USER
+            value: 'immich'
+          - name: POSTGRES_PASSWORD
+            value: 'immich'
         resources:
           requests:
             cpu: 100m
@@ -106,7 +117,7 @@ spec:
             valueFrom:
               path: /tmp/canary-decision.txt
       container:
-        image: "{{workflow.parameters.serving-image}}"
+        image: '{{workflow.parameters.serving-image}}'
         command: [python, canary_monitor.py]
         args:
           - --prometheus-url={{workflow.parameters.prometheus-url}}
@@ -141,23 +152,23 @@ spec:
                   value: "{{inputs.parameters.to-stage}}"
                 - name: model-name
                   value: "{{workflow.parameters.model-name}}"
-    
+
     - name: run-rescore
       container:
-        image: "somaditya24/aesthetic-scoring-service:v4"
+        image: '{{workflow.parameters.serving-image}}'
         command: [python, rescore.py]
         args:
-          - --scoring-url=http://aesthetic-scoring.aesthetic-hub.svc.cluster.local:8000
+          - --aesthetic-service-url=http://aesthetic-service.aesthetic-hub.svc.cluster.local:8000
           - --active-days=30
         env:
           - name: POSTGRES_HOST
-            value: "immich-postgres.aesthetic-hub.svc.cluster.local"
+            value: 'immich-postgres.aesthetic-hub.svc.cluster.local'
           - name: POSTGRES_DB
-            value: "immich"
+            value: 'immich'
           - name: POSTGRES_USER
-            value: "postgres"
+            value: 'immich'
           - name: POSTGRES_PASSWORD
-            value: "postgres123"
+            value: 'immich'
         resources:
           requests:
             cpu: 250m

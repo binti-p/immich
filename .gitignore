@@ -31,6 +31,8 @@ vite.config.js.timestamp-*
 *.tsbuildinfo
 *.tsbuildInfo
 .kiro/*
+**/__pycache__/
+*.pyc
 
 # Local postgres data directory (should never be committed)
 postgres-data/

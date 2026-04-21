@@ -1,0 +1,98 @@
+{
+  "title": "Aesthetic Service",
+  "uid": "aesthetic-service",
+  "panels": [
+    {
+      "title": "Request Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "sum(rate(score_image_request_duration_seconds_count[5m]))",
+          "legendFormat": "requests/s"
+        }
+      ]
+    },
+    {
+      "title": "Cold Start Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "sum(rate(cold_start_total[5m])) / sum(rate(score_image_request_duration_seconds_count[5m]))",
+          "legendFormat": "cold start %"
+        }
+      ]
+    },
+    {
+      "title": "P50 / P95 / P99 Latency (ms)",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(score_image_request_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(score_image_request_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(score_image_request_duration_seconds_bucket[5m])) by (le)) * 1000",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "title": "Score Distribution",
+      "type": "heatmap",
+      "targets": [
+        {
+          "expr": "sum(rate(aesthetic_score_bucket[5m])) by (le)",
+          "legendFormat": "{{le}}"
+        }
+      ]
+    },
+    {
+      "title": "Low Confidence Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "sum(rate(low_confidence_total[5m])) / sum(rate(score_image_request_duration_seconds_count[5m]))",
+          "legendFormat": "low confidence %"
+        }
+      ]
+    },
+    {
+      "title": "Active Model Version (timestamp)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "aesthetic_active_model_version_timestamp",
+          "legendFormat": "model version"
+        }
+      ]
+    },
+    {
+      "title": "Interaction Events Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "sum(rate(interaction_events_total[5m])) by (event_type)",
+          "legendFormat": "{{event_type}}"
+        }
+      ]
+    },
+    {
+      "title": "MinIO Flush Rate",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "sum(rate(minio_flush_total[5m])) by (target)",
+          "legendFormat": "{{target}}"
+        },
+        {
+          "expr": "sum(rate(minio_flush_errors_total[5m]))",
+          "legendFormat": "errors"
+        }
+      ]
+    }
+  ]
+}

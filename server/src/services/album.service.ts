@@ -203,7 +203,7 @@ export class AlbumService extends BaseService {
       if (aesthetic) {
         for (const { id: assetId, success } of results) {
           if (success) {
-            aesthetic.recordInteraction(assetId, auth.user.id, 'album_add', 0.9);
+            aesthetic.recordInteraction(assetId, auth.user.id, 'album_add', 0.8);
           }
         }
       }
@@ -283,6 +283,16 @@ export class AlbumService extends BaseService {
     const removedIds = results.filter(({ success }) => success).map(({ id }) => id);
     if (removedIds.length > 0 && album.albumThumbnailAssetId && removedIds.includes(album.albumThumbnailAssetId)) {
       await this.albumRepository.updateThumbnails();
+    }
+
+    // Aesthetic: record album_remove for successfully removed assets
+    const aesthetic = AestheticService.instance;
+    if (aesthetic) {
+      for (const { id: assetId, success } of results) {
+        if (success) {
+          aesthetic.recordInteraction(assetId, auth.user.id, 'album_remove', 0.2);
+        }
+      }
     }
 
     return results;

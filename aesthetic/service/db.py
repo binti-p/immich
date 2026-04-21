@@ -1,7 +1,6 @@
 """
 All database access for aesthetic-service.
 Uses asyncpg for async FastAPI compatibility.
-Absorbed and extended from scoring-service/db.py.
 """
 import logging
 import os
@@ -159,6 +158,47 @@ async def insert_interaction_event(
             )
 
 
+async def upsert_model_version(
+    version_id: str,
+    dataset_version: Optional[str] = None,
+    mlp_object_key: str = "",
+    embeddings_object_key: str = "",
+):
+    """
+    Upsert model version on startup.
+    The model_versions table has a unique partial index on isColdStart=false,
+    so only one non-cold-start version can be active. We deactivate the
+    previous active version first, then insert/update the new one.
+    """
+    async with _pool.acquire() as conn:
+        async with conn.transaction():
+            # Deactivate any existing active (non-cold-start) version
+            await conn.execute(
+                """
+                UPDATE model_versions SET "isColdStart" = true
+                WHERE "isColdStart" = false AND "versionId" != $1
+                """,
+                version_id,
+            )
+            # Upsert the current version as active
+            await conn.execute(
+                """
+                INSERT INTO model_versions
+                    ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
+                     "isColdStart", "activatedAt", "createdAt")
+                VALUES ($1, $2, $3, $4, false, NOW(), NOW())
+                ON CONFLICT ("versionId") DO UPDATE SET
+                    "isColdStart" = false,
+                    "activatedAt" = NOW()
+                """,
+                version_id,
+                dataset_version or version_id,
+                mlp_object_key,
+                embeddings_object_key,
+            )
+    logger.info(f"[db] Upserted model_version: {version_id}")
+
+
 async def insert_inference_log(
     request_id: str,
     asset_id: str,
@@ -166,6 +206,8 @@ async def insert_inference_log(
     model_version: Optional[str],
     is_cold_start: bool,
     alpha: float,
+    status: str = "success",
+    error_message: Optional[str] = None,
 ):
     async with _pool.acquire() as conn:
         # Ensure model_version exists in model_versions table (FK constraint)
@@ -174,8 +216,8 @@ async def insert_inference_log(
                 """
                 INSERT INTO model_versions
                     ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
-                     "isColdStart", "activatedAt", "createdAt")
-                VALUES ($1, $1, '', '', false, NOW(), NOW())
+                     "activatedAt", "createdAt")
+                VALUES ($1, $1, '', '', NOW(), NOW())
                 ON CONFLICT ("versionId") DO NOTHING
                 """,
                 model_version,
@@ -184,10 +226,10 @@ async def insert_inference_log(
             """
             INSERT INTO inference_log
                 ("requestId", "assetId", "userId", "modelVersion",
-                 "isColdStart", alpha, "requestReceivedAt", "computedAt")
-            VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, NOW(), NOW())
+                 "isColdStart", alpha, "requestReceivedAt", "computedAt", status, "errorMessage")
+            VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, NOW(), NOW(), $7, $8)
             """,
-            request_id, asset_id, user_id, model_version, is_cold_start, alpha,
+            request_id, asset_id, user_id, model_version, is_cold_start, alpha, status, error_message,
         )
 
 
@@ -200,7 +242,6 @@ async def upsert_aesthetic_score(
     is_cold_start: bool,
     request_id: str,
 ):
-    """Absorbed from scoring-service/db.py upsert_aesthetic_score."""
     async with _pool.acquire() as conn:
         await conn.execute(
             """
@@ -223,7 +264,6 @@ async def upsert_aesthetic_score(
 # ── Immich callback ───────────────────────────────────────────────────────────
 
 async def notify_immich(asset_id: str, user_id: str, score: float, model_version: Optional[str]):
-    """Absorbed from scoring-service/db.py notify_immich — now async with httpx."""
     immich_url = os.environ.get("IMMICH_SERVER_URL")
     if not immich_url:
         return
