@@ -291,15 +291,19 @@ export class SearchRepository {
 
     return this.db.transaction().execute(async (trx) => {
       await sql`set local vchordrq.probes = ${sql.lit(probes[VectorIndex.Clip])}`.execute(trx);
+      const semanticBandSize = 0.02;
+      const semanticDistance = sql`smart_search.embedding <=> ${options.embedding}`;
+      const semanticBand = sql`floor((${semanticDistance}) / ${sql.lit(semanticBandSize)})`;
       const items = await searchAssetBuilder(trx, options)
         .selectAll('asset')
         .innerJoin('smart_search', 'asset.id', 'smart_search.assetId')
         .leftJoin('aesthetic_scores', (join) =>
           join.onRef('asset.id', '=', 'aesthetic_scores.assetId').on('aesthetic_scores.userId', '=', options.rankingUserId!),
         )
-        .orderBy(sql`smart_search.embedding <=> ${options.embedding}`)
+        .orderBy(semanticBand)
         .orderBy(sql`CASE WHEN aesthetic_scores.score IS NULL THEN 1 ELSE 0 END`)
         .orderBy('aesthetic_scores.score', 'desc')
+        .orderBy(semanticDistance)
         .orderBy('asset.fileCreatedAt', 'desc')
         .limit(pagination.size + 1)
         .offset((pagination.page - 1) * pagination.size)
