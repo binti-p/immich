@@ -1,8 +1,7 @@
 # CronWorkflow: scheduled weekly retraining
-# Runs every Sunday at 02:00 UTC, which is low-traffic time.
-# Justification: the AVA dataset is static; new training data comes from
-# user feedback accumulated over the prior week (ratings on scored photos).
-# A weekly cadence balances freshness against GPU cost.
+# Runs every Sunday at 02:00 UTC.
+# Gathers interaction data → trains personalized model → evaluates →
+# exports ONNX → quality gate → triggers promotion pipeline.
 apiVersion: argoproj.io/v1alpha1
 kind: CronWorkflow
 metadata:
@@ -11,8 +10,8 @@ metadata:
   labels:
     app.kubernetes.io/part-of: aesthetic-hub
 spec:
-  schedule: "0 2 * * 0"
-  timezone: "UTC"
+  schedule: '0 2 * * 0'
+  timezone: 'UTC'
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 3600
   successfulJobsHistoryLimit: 5
@@ -22,17 +21,13 @@ spec:
       name: train-and-evaluate
     arguments:
       parameters:
-        - name: training-image
-          value: "localhost:5000/aesthetic-training:latest"
-        - name: mlflow-uri
-          value: "http://mlflow.platform.svc.cluster.local:5000"
+        - name: serving-image
+          value: 'ghcr.io/binti-p/aesthetic-service:05874a393dbbe73048acc7b13bb69f6527734c4a'
         - name: minio-endpoint
-          value: "http://minio.platform.svc.cluster.local:9000"
-        - name: data-bucket
-          value: "aesthetic-hub-data"
+          value: 'http://minio.platform.svc.cluster.local:9000'
         - name: model-name
-          value: "aesthetic-scorer"
+          value: 'aesthetic-scorer'
         - name: min-spearman-r
-          value: "0.70"
+          value: '0.70'
         - name: min-ndcg-at-10
-          value: "0.65"
+          value: '0.65'

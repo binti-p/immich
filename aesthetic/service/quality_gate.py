@@ -25,8 +25,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--criteria-file", default="/app/promotion-criteria.yaml")
 parser.add_argument("--minio-endpoint", required=True)
 parser.add_argument("--minio-bucket", default="triton-models")
+parser.add_argument("--data-bucket", default="aesthetic-hub-data")
 parser.add_argument("--model-key", default="staging/personalized_mlp/1/model.onnx")
-parser.add_argument("--test-data-key", default="aesthetic-hub-data/flickr_test_embeddings.npz")
+parser.add_argument("--test-data-key", default="datasets/personalized-flickr/test.parquet")
 parser.add_argument("--output-result", default="/tmp/quality-gate-passed.txt")
 args = parser.parse_args()
 
@@ -83,19 +84,23 @@ except Exception as e:
     sys.exit(1)
 
 # --- Download test data ---
-# This is a .npz file with keys: embeddings (N,768), user_embeddings (N,64), scores (N,)
-# Binti's data pipeline should have put this in MinIO during data prep
+# test.parquet from aesthetic-hub-data/datasets/personalized-flickr/
+# Contains CLIP embeddings (768-dim), user embeddings (64-dim), and ground truth scores
 print("Downloading test data...")
 try:
     s3.download_file(
-        "aesthetic-hub-data",
-        "flickr_test_embeddings.npz",
-        "/tmp/test_data.npz"
+        args.data_bucket,
+        args.test_data_key,
+        "/tmp/test_data.parquet"
     )
-    data = np.load("/tmp/test_data.npz")
-    embeddings = data["embeddings"].astype(np.float32)             # (N, 768)
-    user_embeddings = data["user_embeddings"].astype(np.float32)   # (N, 64)
-    gt_scores = data["scores"].astype(np.float32)                  # (N,) ground truth, 0-1 scale
+    import pyarrow.parquet as pq
+    table = pq.read_table("/tmp/test_data.parquet")
+    df = table.to_pandas()
+
+    # Extract embeddings and scores from parquet columns
+    embeddings = np.stack(df["embedding"].values).astype(np.float32)        # (N, 768)
+    user_embeddings = np.stack(df["user_embedding"].values).astype(np.float32)  # (N, 64)
+    gt_scores = df["score"].values.astype(np.float32)                       # (N,)
     check("test data loaded", True, f"N={len(embeddings)}")
 except Exception as e:
     check("test data loaded", False, str(e))
