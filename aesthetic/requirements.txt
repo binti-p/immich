@@ -17,6 +17,7 @@ onnxruntime==1.18.0
 numpy==1.26.4
 onnx==1.16.1
 torch==2.3.1
+tritonclient[http]==2.44.0
 mlflow==2.15.1
 
 # Object store

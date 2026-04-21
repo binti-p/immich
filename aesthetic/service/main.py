@@ -81,10 +81,26 @@ async def lifespan(app: FastAPI):
     # DB pool
     await db.init_pool()
 
-    # Download models from MinIO, load into ONNX Runtime
-    global_path, pers_path, version = download_models()
-    scorer = Scorer(global_path, pers_path)
-    scorer.model_version = version
+    # Load scorer — either Triton (k8s) or in-process ONNX (local)
+    use_triton = os.environ.get("USE_TRITON", "false").lower() in ("true", "1", "yes")
+
+    if use_triton:
+        # Triton handles model loading from MinIO — no local download needed
+        scorer = Scorer(global_model_path="", personalized_model_path="")
+        # Get version from MinIO for tracking
+        from model_loader import _s3_client, _latest_model_version
+        try:
+            s3 = _s3_client()
+            version = _latest_model_version(s3) or "v0000-00-00"
+        except Exception:
+            version = "v0000-00-00"
+        scorer.model_version = version
+    else:
+        # Download models from MinIO, load into ONNX Runtime
+        global_path, pers_path, version = download_models()
+        scorer = Scorer(global_path, pers_path)
+        scorer.model_version = version
+
     active_model_version = version
     
     # Insert model version into database
