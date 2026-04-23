@@ -151,7 +151,7 @@ async def health():
     return {
         "status": "healthy",
         "model_version": active_model_version,
-        "personalized_model_loaded": scorer.personalized_sess is not None if scorer else False,
+        "personalized_model_loaded": bool(getattr(scorer, "personalized_available", False)) if scorer else False,
     }
 
 
