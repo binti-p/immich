@@ -81,7 +81,7 @@ def seed_test_data():
                 VALUES (%s::uuid, %s::uuid, 'IMAGE', '/smoke/test.jpg',
                         NOW(), NOW(),
                         NOW(),
-                        E'\\x00', 'sha1',
+                        decode('da39a3ee5e6b4b0d3255bfef95601890afd80709', 'hex'), 'sha1',
                         'test.jpg')
                 ON CONFLICT (id) DO NOTHING
                 """,
