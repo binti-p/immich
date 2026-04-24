@@ -34,8 +34,8 @@ BASE_URL = args.service_url.rstrip("/")
 RESULTS = []
 
 # Test identifiers — use fixed UUIDs so cleanup is reliable
-TEST_ASSET_ID = "00000000-0000-0000-0000-smoke0000001"
-TEST_USER_ID = "00000000-0000-0000-0000-smoke0000099"
+TEST_ASSET_ID = "00000000-0000-0000-0000-5a0ce0000001"
+TEST_USER_ID = "00000000-0000-0000-0000-5a0ce0000099"
 
 
 def check(name, passed, detail=""):
