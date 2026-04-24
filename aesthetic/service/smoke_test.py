@@ -75,12 +75,14 @@ def seed_test_data():
                 """
                 INSERT INTO asset (id, "ownerId", type, "originalPath",
                                    "fileCreatedAt", "fileModifiedAt",
-                                   "createdAt", "updatedAt",
-                                   checksum, "originalFileName")
+                                   "localDateTime",
+                                   checksum, "checksumAlgorithm",
+                                   "originalFileName")
                 VALUES (%s::uuid, %s::uuid, 'IMAGE', '/smoke/test.jpg',
                         NOW(), NOW(),
-                        NOW(), NOW(),
-                        E'\\\\x00', 'test.jpg')
+                        NOW(),
+                        E'\\x00', 'sha1',
+                        'test.jpg')
                 ON CONFLICT (id) DO NOTHING
                 """,
                 (TEST_ASSET_ID, TEST_USER_ID),
