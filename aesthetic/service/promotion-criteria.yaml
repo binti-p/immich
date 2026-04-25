@@ -7,21 +7,21 @@ quality_gate:
   # Spearman rank correlation on Flickr-AES held-out test set
   # Justified: initial implementation achieved ~0.72 SRCC on personalized model
   # We set floor at 0.65 to allow for slight degradation from retraining on smaller feedback data
-  min_spearman_r: -1.0
+  min_spearman_r: 0.65
 
   # Mean Squared Error on 0-1 scale
   # Justified: acceptable scoring error for ranking purposes
-  max_mse: 1.0
+  max_mse: 0.05
 
   # No NaN or Inf outputs allowed — hard requirement
   allow_nan_outputs: false
 
   # P95 latency for a batch of 64 on CPU (ms)
   # Justified: MLP is 1.9MB, CPU batch inference should be well under 10ms
-  max_p95_latency_ms: 200.0
+  max_p95_latency_ms: 10.0
 
   # Minimum number of test samples to run gate on
-  min_eval_samples: 25
+  min_eval_samples: 500
 
 canary:
   # Observation window in minutes before promotion decision
