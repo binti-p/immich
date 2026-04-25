@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aesthetic-scoring-backfill
+  namespace: aesthetic-hub
+  labels:
+    app: aesthetic-scoring-backfill
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: aesthetic-scoring-backfill
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backfill
+              image: ghcr.io/binti-p/aesthetic-service:main
+              imagePullPolicy: Always
+              command:
+                - python
+                - -m
+                - pipelines.batch.backfill_missing_scoring
+              args:
+                - --limit
+                - "200"
+              env:
+                - name: POSTGRES_HOST
+                  value: immich-postgres.aesthetic-hub.svc.cluster.local
+                - name: POSTGRES_PORT
+                  value: "5432"
+                - name: POSTGRES_DB
+                  value: immich
+                - name: POSTGRES_USER
+                  value: immich
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: immich-postgres-secret
+                      key: password
+                - name: AESTHETIC_SERVICE_URL
+                  value: http://aesthetic-service.aesthetic-hub.svc.cluster.local:8000
+                - name: BACKFILL_SLEEP_SECONDS
+                  value: "0.05"
+                - name: BACKFILL_TIMEOUT_SECONDS
+                  value: "120"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi

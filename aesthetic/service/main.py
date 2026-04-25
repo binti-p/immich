@@ -83,7 +83,8 @@ async def lifespan(app: FastAPI):
 
     # Load scorer — either Triton (k8s) or in-process ONNX (local)
     use_triton = os.environ.get("USE_TRITON", "false").lower() in ("true", "1", "yes")
-
+    pers_path = None
+  
     if use_triton:
         # Triton handles model loading from MinIO — no local download needed
         scorer = Scorer(global_model_path="", personalized_model_path="")
@@ -112,7 +113,7 @@ async def lifespan(app: FastAPI):
     
     logger.info(
         f"[startup] Scorer ready — model_version={version}, "
-        f"personalized={'yes' if pers_path else 'no (cold-start only)'}"
+        f"personalized={'yes' if (use_triton or pers_path) else 'no (cold-start only)'}"
     )
 
     # E3.4 — set model version gauge
@@ -150,7 +151,7 @@ async def health():
     return {
         "status": "healthy",
         "model_version": active_model_version,
-        "personalized_model_loaded": scorer.personalized_sess is not None if scorer else False,
+        "personalized_model_loaded": bool(getattr(scorer, "personalized_available", False)) if scorer else False,
     }
 
 

@@ -46,7 +46,8 @@ def convert_ckpt_to_optimized_onnx(ckpt_path, output_dir):
     print(f"[2/4] Inference-only .pth saved")
 
     # --- 3. Export base ONNX ---
-    model = PersonalizedMLP(num_users=168)
+    num_users = ckpt.get("num_users", 168)
+    model = PersonalizedMLP(num_users=num_users)
     model.load_state_dict(state_dict)
     model.eval()
 
