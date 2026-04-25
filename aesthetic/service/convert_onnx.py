@@ -84,7 +84,13 @@ def convert_ckpt_to_optimized_onnx(ckpt_path, output_dir):
     sess_opts.optimized_model_filepath = optimized_onnx_path
     ort.InferenceSession(base_onnx_path, sess_opts=sess_opts,
                          providers=["CPUExecutionProvider"])
-    print(f"[4/4] Optimized ONNX saved ({os.path.getsize(optimized_onnx_path)/1e6:.2f} MB)")
+    if not os.path.exists(optimized_onnx_path):
+        # Fallback: use base ONNX if optimization didn't produce a file
+        import shutil
+        shutil.copy2(base_onnx_path, optimized_onnx_path)
+        print(f"[4/4] Optimization skipped, using base ONNX ({os.path.getsize(optimized_onnx_path)/1e6:.2f} MB)")
+    else:
+        print(f"[4/4] Optimized ONNX saved ({os.path.getsize(optimized_onnx_path)/1e6:.2f} MB)")
 
     # --- Sanity check ---
     sess = ort.InferenceSession(optimized_onnx_path,
