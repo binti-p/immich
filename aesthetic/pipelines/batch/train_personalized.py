@@ -94,155 +94,6 @@ def s3():
     )
 
 
-def upload_user_embeddings_to_postgres(client, conn, version_id: str, dataset_version: str):
-    """
-    Upload user embeddings from MinIO to Postgres and activate model version.
-    
-    Steps:
-    1. Read user_embeddings.parquet from MinIO
-    2. Upload to Postgres user_embeddings table (UPSERT)
-    3. Activate model version in model_versions table
-    4. Verify upload succeeded
-    """
-    log.info(f"\n{'='*60}")
-    log.info(f"UPLOADING MODEL TO PRODUCTION")
-    log.info(f"  Model version: {version_id}")
-    log.info(f"  Dataset version: {dataset_version}")
-    log.info(f"{'='*60}\n")
-    
-    # 1. Read user embeddings from MinIO
-    embeddings_key = f"models/{version_id}/user_embeddings.parquet"
-    log.info(f"[minio] Reading s3://{BUCKET}/{embeddings_key}")
-    
-    try:
-        obj = client.get_object(Bucket=BUCKET, Key=embeddings_key)
-        table = pq.read_table(io.BytesIO(obj["Body"].read()))
-        
-        embeddings = []
-        for i in range(table.num_rows):
-            embeddings.append({
-                "user_id": table.column("user_id")[i].as_py(),
-                "embedding": table.column("embedding")[i].as_py(),
-                "model_version": table.column("model_version")[i].as_py(),
-                "updated_at": table.column("updated_at")[i].as_py(),
-            })
-        
-        log.info(f"[minio] Read {len(embeddings)} user embeddings")
-        
-    except Exception as e:
-        log.error(f"[minio] Failed to read user embeddings: {e}")
-        raise
-    
-    # 2. Upload to Postgres user_embeddings table
-    if not embeddings:
-        log.warning("[postgres] No embeddings to upload")
-        return
-    
-    log.info(f"[postgres] Uploading {len(embeddings)} user embeddings...")
-    
-    with conn.cursor() as cur:
-        from psycopg2.extras import execute_values
-        
-        values = [
-            (e["user_id"], e["embedding"], e["model_version"], e["updated_at"])
-            for e in embeddings
-        ]
-        
-        query = """
-            INSERT INTO user_embeddings ("userId", embedding, "modelVersion", "updatedAt")
-            VALUES %s
-            ON CONFLICT ("userId") DO UPDATE SET
-                embedding = EXCLUDED.embedding,
-                "modelVersion" = EXCLUDED."modelVersion",
-                "updatedAt" = EXCLUDED."updatedAt"
-        """
-        
-        execute_values(cur, query, values)
-        conn.commit()
-    
-    log.info(f"[postgres] ✓ Uploaded {len(embeddings)} user embeddings")
-    
-    # 3. Activate model version
-    log.info(f"[postgres] Activating model version: {version_id}")
-    
-    with conn.cursor() as cur:
-        # Deactivate previous active version
-        cur.execute(
-            """
-            UPDATE model_versions 
-            SET "deactivatedAt" = NOW()
-            WHERE "activatedAt" IS NOT NULL 
-              AND "deactivatedAt" IS NULL 
-              AND "versionId" != %s
-            """,
-            (version_id,),
-        )
-        deactivated_count = cur.rowcount
-        if deactivated_count > 0:
-            log.info(f"[postgres] Deactivated {deactivated_count} previous model version(s)")
-        
-        # Upsert current version as active
-        mlp_key = f"models/{version_id}/best_personalized_model.pth"
-        embeddings_key = f"models/{version_id}/user_embeddings.parquet"
-        
-        cur.execute(
-            """
-            INSERT INTO model_versions
-                ("versionId", "datasetVersion", "mlpObjectKey", "embeddingsObjectKey",
-                 "activatedAt", "createdAt")
-            VALUES (%s, %s, %s, %s, NOW(), NOW())
-            ON CONFLICT ("versionId") DO UPDATE SET
-                "activatedAt" = NOW(),
-                "deactivatedAt" = NULL
-            """,
-            (version_id, dataset_version, mlp_key, embeddings_key),
-        )
-        
-        conn.commit()
-    
-    log.info(f"[postgres] ✓ Activated model version: {version_id}")
-    
-    # 4. Verify upload
-    log.info("[postgres] Verifying upload...")
-    
-    with conn.cursor() as cur:
-        cur.execute(
-            'SELECT COUNT(*) as count FROM user_embeddings WHERE "modelVersion" = %s',
-            (version_id,),
-        )
-        embeddings_count = cur.fetchone()["count"]
-        
-        cur.execute(
-            """
-            SELECT "versionId", "datasetVersion", "activatedAt", "deactivatedAt"
-            FROM model_versions
-            WHERE "versionId" = %s
-            """,
-            (version_id,),
-        )
-        model_row = cur.fetchone()
-        
-        if not model_row:
-            log.error(f"[postgres] Model version {version_id} not found in model_versions table")
-            raise RuntimeError("Model version verification failed")
-        
-        is_active = model_row["activatedAt"] is not None and model_row["deactivatedAt"] is None
-        
-        log.info(f"[postgres] Embeddings count: {embeddings_count}")
-        log.info(f"[postgres] Model version: {model_row['versionId']}")
-        log.info(f"[postgres] Dataset version: {model_row['datasetVersion']}")
-        log.info(f"[postgres] Active: {is_active}")
-        
-        if not is_active:
-            raise RuntimeError("Model version is not active after upload")
-    
-    log.info(f"\n{'='*60}")
-    log.info(f"UPLOAD COMPLETE")
-    log.info(f"  Embeddings uploaded: {embeddings_count}")
-    log.info(f"  Model active: {is_active}")
-    log.info(f"{'='*60}\n")
-
-
 def load_manifest(client, dataset_version: str) -> pd.DataFrame:
     """
     Load retraining manifest (train + val splits only).
@@ -285,7 +136,6 @@ def active_model_version(conn) -> str | None:
             FROM model_versions
             WHERE "activatedAt" IS NOT NULL
               AND "deactivatedAt" IS NULL
-              AND "isColdStart" = false
             ORDER BY "activatedAt" DESC
             LIMIT 1
             """
@@ -876,21 +726,6 @@ def main():
                 version_id,
                 gate_result["passed"],
             )
-            
-            # ── Upload Model to Production ───────────────────────────────────
-            # Upload user embeddings to Postgres and activate model version
-            # Always upload, but warn if quality gates failed
-            if not gate_result["passed"]:
-                log.warning(f"⚠ Quality gates FAILED for {version_id}, but uploading to production anyway")
-            
-            log.info(f"Uploading model {version_id} to production...")
-            try:
-                upload_user_embeddings_to_postgres(client, conn, version_id, f"v{dataset_version}")
-                log.info(f"✓ Model {version_id} uploaded and activated in production")
-            except Exception as e:
-                log.error(f"✗ Failed to upload model to production: {e}", exc_info=True)
-                log.error("Training artifacts saved to MinIO but not activated in Postgres")
-                raise
 
 
 if __name__ == "__main__":
