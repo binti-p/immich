@@ -21,7 +21,7 @@ quality_gate:
   max_p95_latency_ms: 10.0
 
   # Minimum number of test samples to run gate on
-  min_eval_samples: 50
+  min_eval_samples: 60
 
 canary:
   # Observation window in minutes before promotion decision
