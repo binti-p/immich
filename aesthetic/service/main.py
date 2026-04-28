@@ -66,6 +66,19 @@ ACTIVE_MODEL_VERSION_TIMESTAMP = Gauge(
     "Unix timestamp of active model version (0 if bootstrap/unknown)",
 )
 
+# Drift detection metrics
+CLIP_EMBEDDING_NORM = Histogram(
+    "clip_embedding_norm",
+    "L2 norm of CLIP embeddings (input drift detection)",
+    buckets=[0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0],
+)
+
+AESTHETIC_ALPHA = Histogram(
+    "aesthetic_alpha",
+    "Distribution of alpha values (personalization weight)",
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
 MINIO_FLUSH_TOTAL = minio_client.MINIO_FLUSH_TOTAL
 MINIO_FLUSH_ERRORS = minio_client.MINIO_FLUSH_ERRORS
 
@@ -325,6 +338,15 @@ async def score_image(req: ScoreImageRequest):
     if low_confidence:
         LOW_CONFIDENCE_TOTAL.inc()  # E3.2
 
+    # Track metrics
+    SCORE_IMAGE_DURATION.observe(time.time() - start)
+    AESTHETIC_SCORE_HISTOGRAM.observe(round(final_score, 4))  # E3.1
+    AESTHETIC_ALPHA.observe(effective_alpha)  # Track alpha distribution
+    
+    # Track CLIP embedding norm for drift detection
+    clip_norm = float(np.linalg.norm(clip_emb))
+    CLIP_EMBEDDING_NORM.observe(clip_norm)
+
     # 5. Write inference_log (success)
     await db.insert_inference_log(
         request_id=request_id,
@@ -364,9 +386,6 @@ async def score_image(req: ScoreImageRequest):
         "personalized_score": round(p_score, 4) if p_score is not None else None,
         "low_confidence": low_confidence,
     })
-
-    SCORE_IMAGE_DURATION.observe(time.time() - start)
-    AESTHETIC_SCORE_HISTOGRAM.observe(round(final_score, 4))  # E3.1
 
     return ScoreImageResponse(
         request_id=request_id,
